@@ -185,7 +185,7 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
     <code>2 fail</code> to show only those attempts on the waves and list them under the line (the first 200)</td></tr>
   <tr><td><span class="ui">Bind…</span></td><td>the instances where all its signals are (above)</td></tr>
   <tr><td><span class="ui">✎</span></td><td>edit the assertion here (see <a href="#edit">Edit and run again</a>)</td></tr>
-  <tr><td><span class="ui">⟳</span></td><td>read its file from the disk again</td></tr>
+  <tr><td><span class="ui">⟳</span></td><td>read its file again from where <span class="ui">Load file…</span> read it, no dialog</td></tr>
   <tr><td><span class="ui">✕</span></td><td>remove the assertion from the list, with its bindings</td></tr>
   <tr><td><span class="ui">Evaluate</span></td><td>run the binding again over the waves of this view (in a Web Worker when it is long)</td></tr>
   <tr><td><span class="ui">Go to first failure</span></td><td>select its first failing attempt</td></tr>
@@ -231,6 +231,17 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   <code>✕ fail</code>, <code>… not ended</code>, <code>⊘ disabled</code>, <code>… capped</code> (one flag, <code>▶ ✕ fail</code>, when it
   starts and ends in one cycle, as in the first picture). The title line says it in words: <code>apb_demo_no_wait: fail at 105.0 ns —
   expected PREADY at cycle 10</code>. <kbd>Esc</kbd> clears it.</p>
+<p><b>Earlier cycles.</b> A step that reads the past — <code>$past(x)</code>, <code>$past(x, 2)</code>, <code>$stable</code>,
+  <code>$changed</code>, <code>$rose</code>, <code>$fell</code> — shows on the selected attempt where it reads: a ring at that cycle and a
+  dashed arc from it to the step's circle, up through a thin line of its own over the row (only while the attempt is selected) where it
+  is named, <code>$stable</code>, <code>$past 2</code>…, so no text covers a wave; on the step's row and on the rows of the signals it
+  reads. <code>apb_addr_stable</code>'s <code>$stable(PADDR) &amp;&amp; $stable(PWRITE)</code> rings PADDR and PWRITE one
+  cycle before the step: the two values it compared. Calls inside one another add up (<code>$rose($past(req))</code>:
+  <code>$rose 2</code>); a <code>$past</code> with a gating expression or a clock of its own is not marked.</p>
+<figure><img src="img/sva-past.png" alt="apb_addr_stable's first attempt: $stable rings on PADDR and PWRITE one cycle before step 2" loading="lazy">
+<figcaption><b>What <code>$stable</code> compared.</b> The first attempt of <code>apb_addr_stable</code> selected: step 2,
+  <code>$stable(PADDR) &amp;&amp; $stable(PWRITE)</code>, holds at cycle 6; the rings at cycle 5 on its row, on PADDR and PWRITE (and their
+  copies in the group) are the values it compared them with.</figcaption></figure>
 
 <h3 id="navigate">Going from one to the next</h3>
 <table>
@@ -289,7 +300,8 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 <h2 id="why">Why: an attempt taken apart</h2>
 <p>With an attempt selected the panel shows <b>Why</b>: the assertion's booleans — its steps, an <code>if</code> condition,
   <code>disable iff</code> — each taken apart into its operands (<code>PSEL &amp;&amp; PENABLE</code> → <code>PSEL</code>,
-  <code>PENABLE</code>; <code>$rose(req)</code> → <code>req</code>), one column per cycle of the attempt (at most 64). 1 is green, 0
+  <code>PENABLE</code>; <code>$rose(req)</code> → <code>req</code>), one column per cycle of the attempt (at most 64), and before them, in
+  italics, the cycles a <code>$past</code> or <code>$stable</code> of it reads. 1 is green, 0
   grey, x red, buses in hex. A ringed cell is where a step matched, the red one is where the attempt failed: the operand that broke
   it is read off directly. Click a cycle's header to put the cursor there; ✕ or <kbd>Esc</kbd> closes it.</p>
 <figure><img src="img/sva-why.png" alt="Why of attempt 2 of apb_demo_no_wait: PREADY 0 at cycle 10" loading="lazy">
@@ -313,9 +325,21 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 <figure><img src="img/sva-edit.png" alt="The editor of apb_demo_no_wait open under its line" loading="lazy">
 <figcaption><b>✎ open.</b> The statement of <code>apb_demo_no_wait</code> in a text box, <span class="ui">Apply</span>,
   <span class="ui">Cancel</span>, and where it comes from: <code>apb.sva:110</code>.</figcaption></figure>
-<p>To work in your own editor instead: <span class="ui">⟳</span> reads the assertion's file from the disk again. The first time the
-  browser asks you to pick the file (Chrome and Edge keep it: after a reload only the permission is asked again; Firefox and Safari ask
-  every time). Changed assertions are marked <b>changed</b> and evaluated again. <span class="ui">Watch</span> in the panel's header
+<p><b>A floating editor.</b> The right button on any row of an assertion's group on the waves (its ⚑ row, the attempts, a step, a
+  signal again) has <span class="ui">Edit the assertion…</span>: the same editor in a box of its own over the waves (also
+  <span class="ui">⧉ Float</span> in the editor under the line). Drag it by its head next to what you look at, change the text and
+  <span class="ui">Apply</span> (<kbd>ctrl</kbd>+<kbd>Enter</kbd>): the waves change under it, the box stays open to try again, and the
+  list follows at once. It has the assertion's bindings with their counts (<span class="ui">Evaluate</span>,
+  <span class="ui">Unbind</span>, <span class="ui">Bind…</span>), <span class="ui">⟳</span>, <span class="ui">Revert to the page's</span>,
+  and <span class="ui">In the list</span>; <kbd>Esc</kbd> or ✕ closes it.</p>
+<figure><img src="img/sva-float.png" alt="The floating editor of apb_demo_no_wait over the waves, its failing attempt selected" loading="lazy">
+<figcaption><b>Edit the assertion…</b> The box of <code>apb_demo_no_wait</code> over its failing attempt: its statement,
+  <span class="ui">Apply</span>, <span class="ui">⟳</span>, its binding to <code>apb_tb</code> with <code>3 pass · 2 fail</code> and the
+  attempt selected; drag it by its head.</figcaption></figure>
+<p>To work in your own editor instead: <span class="ui">⟳</span> reads the assertion's file again from where
+  <span class="ui">Load file…</span> read it, with no dialog (Chrome and Edge keep the file's handle: after a reload only the permission
+  is asked again; other browsers read the file loaded again while the page is open). A file built into the page is picked the first
+  time. Changed assertions are marked <b>changed</b> and evaluated again. <span class="ui">Watch</span> in the panel's header
   (Chrome / Edge) checks those files every second: save in the editor and the page follows by itself.</p>
 <div class="note"><p>The static SVG figures of a page keep the results the page was built with; editing in the page changes the
   viewers.</p></div>
@@ -533,7 +557,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.64 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

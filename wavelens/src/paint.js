@@ -487,7 +487,8 @@ function arrowLanes(rows, bms, arrows, marks = []) {
   rows.forEach((r, i) => { if (r.type === 'sig' && r.ug && !idx.has(r.full)) idx.set(r.full, i); });   // in your group first (paintBookmarks)
   rows.forEach((r, i) => { if (r.type === 'sig' && !r.same && !idx.has(r.full)) idx.set(r.full, i); });
   rows.forEach((r, i) => { if (r.type === 'sig' && r.same && !idx.has(r.full)) idx.set(r.full, i); });   // copies: when the original is not shown
-  const rowAt = o => (o && o.signal != null && idx.has(o.signal) ? idx.get(o.signal) : -1), rowOf = n => rowAt(bms.find(x => x.n === n));
+  const rowAt = o => (o && o.row ? rows.indexOf(o.row) : o && o.signal != null && idx.has(o.signal) ? idx.get(o.signal) : -1);   // (a plugin's: the row itself)
+  const rowOf = n => rowAt(bms.find(x => x.n === n));
   arrows.forEach((a, i) => {
     if (!a.label || !has(a.from) || !has(a.to)) return;
     const r1 = rowOf(a.from), r2 = rowOf(a.to), at = Math.max(-1, r1 === r2 ? r1 - 1 : Math.min(r1, r2));
@@ -506,7 +507,8 @@ function arrowLanes(rows, bms, arrows, marks = []) {
   }
   return lanes;
 }
-const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark, of a marker's text
+// the lane of a lifted bookmark, of a marker's text; a plugin's line of its own over a row: its `lane` (view.extraLanes)
+const laneId = b => b.lane || 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');
 function withLanes(rows, lanes) { // rows with {type: 'lane', ids: [arrow index]} rows spliced in
   const out = [], lane = i => { if (lanes.has(i)) out.push({ type: 'lane', ids: lanes.get(i), name: '', depth: 0, anc: [] }); };
   lane(-1); rows.forEach((r, i) => { out.push(r); lane(i); });
@@ -541,7 +543,7 @@ function layoutRows(rows, rh, laneH, y = 0) {
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
 const laneKey = (bms, arrows, marks) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]),
   (arrows || []).map(a => [a.from, a.to, !!a.label]),
-  (marks || []).map(m => [m.signal || null, m.lift || false, m.delta ? 1 + (m.level || 0) : 0])]);
+  (marks || []).map(m => [m.signal || null, m.lift || false, m.delta ? 1 + (m.level || 0) : 0, m.lane || 0])]);
 const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
   return m; };
 // an arrow's label with its placeholders filled at the times of its ends: {dt} the time between them (cycles, "3T", in

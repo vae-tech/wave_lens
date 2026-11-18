@@ -547,10 +547,17 @@ without building the page again:
   A text that does not parse is not applied: the editor keeps it and says where it stops. The edited file is this
   browser's copy (kept over a reload, marked **edited** on the lines that differ from the page's file);
   **Revert to the page's** in the editor, or **Clear**, brings the page's file back. Copy the text into your source
-  when you are happy with it.
-- **⟳** reads the assertion's file from the disk again. The first time the browser asks you to pick the file (Chrome /
-  Edge keep it: after a reload of the page only the permission is asked again; Firefox and Safari have no such API and
-  ask every time); its changed assertions are marked **changed** and evaluated again.
+  when you are happy with it. **⧉ Float** moves the editor into a box of its own (below).
+- **⟳** reads the assertion's file again from where **Load file…** read it, with no dialog: Chrome / Edge keep the
+  file's handle (after a reload of the page only the permission is asked again); other browsers read the file loaded
+  again while the page is open (one that cannot is asked for the file). A file built into the page, or one not loaded
+  in it yet, is picked the first time. Its changed assertions are marked **changed** and evaluated again.
+- **Edit the assertion…** (the right button on any row of its group on the waves: the ⚑ row, attempts, a step, a
+  signal again) opens the same editor in a **floating box** over the waves: drag it by its head where you look,
+  change the text and **Apply** (ctrl+Enter): the waves change under it and the box stays open to try again; a text
+  that does not parse is said in it. It shows the assertion's bindings with their counts (**Evaluate**, **Unbind**,
+  **Bind…**), **⟳** and **Revert to the page's**; **In the list** shows its line in the panel, which follows at once;
+  Esc or ✕ closes it.
 - **Watch** (in the panel's header, Chrome / Edge) checks every second the files read with ⟳: save one in your editor
   and the page parses it and evaluates its bindings again by itself.
 
@@ -575,6 +582,13 @@ highlighted and copied (`a_req_ack@tb.dut`) like a module. Inside:
   instance and on their copies in the group; its **start and end** as dashed lines across the rows with flags in the
   group's band: `▶ start`, and how it ended — `✓ pass`, `✕ fail`, `… not ended` (still active at the end of the dump),
   `⊘ disabled`, `… capped` (one flag, `▶ ✓ pass`, when it starts and ends in one cycle).
+- what the selected attempt's steps **read from earlier cycles**: for a `$past(x)`, `$past(x, 2)`, `$stable`, `$changed`,
+  `$rose` or `$fell` in a step, a ring at the cycle it reads and a dashed arc from there to the step's circle; the arc
+  goes up into a thin line of its own over the row (as a lifted bookmark's, only while the attempt is selected) where it
+  is named, `$stable`, `$past 2` …, so no text covers a wave. On the step's row and on the rows of the signals it reads (and their copies), so a `$stable(PADDR)`
+  shows the two values of PADDR it compared. Calls inside one another add up (`$rose($past(req))`: `$rose 2`); a `$past`
+  with a gating expression or a clock of its own, or a count that is no number, is not marked. The step's tooltip says
+  the cycles too (`$stable(PADDR): cycle 5`); a static SVG marks its focused attempt the same way.
 
 **Click a line of the panel** to go to that assertion: its group opens on the waves with its first failure (else its
 first pass) selected at the zoom you have, the attempt in the middle of the window; click again for its next one,
@@ -613,7 +627,7 @@ names apart by commas, keep their meaning (labels and `*` patterns).
 
 **Why.** With an attempt selected the panel shows **Why**: the assertion's booleans (its steps, an `if` condition,
 `disable iff`), each taken apart into its operands (`PSEL && PENABLE` → `PSEL`, `PENABLE`; `$rose(req)` → `req`), one
-column per cycle of the attempt (at most 64) with the value of every part — 1 green, 0 grey, x red, buses in hex. A
+column per cycle of the attempt (at most 64; before them, in italics, the cycles a `$past` or `$stable` of it reads) with the value of every part — 1 green, 0 grey, x red, buses in hex. A
 cell where a step matched is ringed, the one where the attempt failed is red, so the operand that broke it is read off
 directly. A cycle's header puts the cursor there; ✕ or Esc closes it.
 

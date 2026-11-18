@@ -9202,6 +9202,105 @@ def sva_edit(browser, build):
     ctx.close()
 
 
+def sva_float(browser, build):
+    """On the APB page: what $stable and $past read from earlier cycles marked on the selected attempt (and in Why); the
+    floating editor of an assertion opened by the right button on its rows (drag, Apply kept open, a bad text, Esc); Load
+    file… keeps where each file came from, so ⟳ reads it again with no dialog (a handle faked; a File of the input)."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('assertions: $past / $stable marks, the floating editor, ⟳ from where a file was loaded')
+    ctx = browser.new_context(viewport={'width': 1360, 'height': 1400})
+    page = ctx.new_page()
+    errs = []; page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    v = page.locator('.wv').first
+    calls = page.evaluate("""['$stable(PADDR) && $stable(PWRITE)', '$past(a, 2) == b', '$rose($past(req))', "$past(x, 2'd3)", '$past(c, 1, en)', '$past(d, N)',
+        '$fell(f[0]) || $changed({g, h})'].map(l => SVA.backCalls(l).map(c => `${c.text}:${c.arg}:${c.back}`).join(' '))""")
+    check(calls == ['$stable:PADDR:1 $stable:PWRITE:1', '$past 2:a:2', '$rose 2:$past(req):2 $past:req:1', '$past 3:x:3', '', '', '$fell:f[0]:1 $changed:{g, h}:1'],
+          f'the functions that read earlier cycles: $past n back (nested ones add), $stable $rose $fell $changed one; a gated $past or a count that is no number left out {calls}')
+    sel = lambda lab, i=0: page.evaluate(f"""(() => {{ const P = SVA.panels()[0], b = P.bindings.find(b => b.assert === '{lab}'); P.reveal(b); P.select(b, {i}); }})()""")
+    sel('apb_addr_stable'); page.wait_for_timeout(200)
+    back = page.evaluate("""(() => { const P = SVA.panels()[0], b = P.bindings.find(b => b.assert === 'apb_addr_stable'), v = P.v;
+        v.draw(); const w = v.canvas.clientWidth - 0, T = b.results.cycles;
+        const lanes = WaveLens.internal.peek(v).lay.filter(o => o.row.type === 'lane' && o.row.ids.some(id => String(id).startsWith('sva-past:'))).length;
+        return { back: (b.draw.g.back || []).map(m => [m.on, m.text, Math.round(m.xb - m.xa), m.lane]), lanes }; })()""")
+    on = sorted({(m[0], m[1]) for m in back['back']}); dx = {m[2] for m in back['back']}
+    check(on == [('cp', '$stable'), ('src', '$stable'), ('step', '$stable')] and len(dx) == 1 and min(dx) > 4 and len(back['back']) == 5
+          and all(m[3] for m in back['back']) and back['lanes'] == 5,
+          f'$stable of the selected attempt: a ring one cycle back and an arc up to a line of its own over the row, named there; on the step, PADDR and PWRITE, their copies ({back})')
+    why = v.locator('.sva .svw')
+    page.wait_for_function("document.querySelector('.wv .sva .svw table.svw-t')")
+    pre = why.locator('thead th.pre').count(); first = why.locator('thead th button').first.inner_text()
+    a0 = page.evaluate("SVA.panels()[0].bindings.find(b => b.assert === 'apb_addr_stable').results.assertions[0].attempts[0].start")
+    check(pre == 1 and first == str(a0 - 1), f'Why: the cycle before the attempt that $stable reads is a column of its own ({pre}, first {first}, start {a0})')
+    page.evaluate("SVA.panels()[0].unselect()")
+    gone = page.evaluate("""WaveLens.internal.peek(SVA.panels()[0].v).lay.filter(o => o.row.type === 'lane' && o.row.ids.some(id => String(id).startsWith('sva-past:'))).length""")
+    check(gone == 0, f'no attempt selected: those lines are gone ({gone})')
+    # the floating editor: the right button on the ⚑ row of apb_demo_no_wait in the names column
+    sel('apb_demo_no_wait'); page.wait_for_timeout(100)
+    r = page.evaluate("""(() => { const P = SVA.panels()[0], b = P.bindings.find(b => b.assert === 'apb_demo_no_wait');
+        const el = WaveLens.internal.peek(P.v).namesEl.querySelector(`.row[data-r="${WaveLens.internal.peek(P.v).vis.indexOf(b.draw.g)}"]`); el.scrollIntoView({ block: 'center' }); const q = el.getBoundingClientRect();
+        return [q.left + 30, q.top + q.height / 2]; })()""")
+    page.mouse.click(r[0], r[1], button='right')
+    item = page.locator('[role=menu] button[data-m=svaed]')
+    check(item.count() == 1, 'the right button on an assertion\'s ⚑ row: Edit the assertion…')
+    item.click()
+    fl = page.locator('.wv .svfl'); ta = fl.locator('textarea.src')
+    check(fl.count() == 1 and ta.input_value().strip().startswith('apb_demo_no_wait: assert property') and page.evaluate('document.activeElement.matches(".svfl textarea.src")'),
+          'Edit the assertion…: a box of its own with its statement, the focus in it')
+    h = fl.locator('.flh b').bounding_box(); b0 = fl.bounding_box()
+    page.mouse.move(h['x'] + 5, h['y'] + 5); page.mouse.down(); page.mouse.move(h['x'] + 105, h['y'] + 125, steps=4); page.mouse.up(); b1 = fl.bounding_box()
+    check(abs(b1['x'] - b0['x'] - 100) < 2 and abs(b1['y'] - b0['y'] - 120) < 2, f'the box is dragged by its head ({b0["x"]:.0f},{b0["y"]:.0f} -> {b1["x"]:.0f},{b1["y"]:.0f})')
+    st = lambda: page.evaluate("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running ? [b.results.assertions[0].stats.pass, b.results.assertions[0].stats.fail] : null; })()")
+    s0 = st(); text = ta.input_value()
+    ta.fill(text.replace('|-> PREADY)', '|-> ##[0:2] PREADY)')); ta.press('Control+Enter')
+    page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running && b.results.assertions[0].stats.fail === 0; })()")
+    page.evaluate('SVA.ready()')
+    fb = fl.locator('.fb1').inner_text(); steps = page.evaluate("WaveLens.internal.peek(SVA.panels()[0].v).vis.filter(r => r.cls === 'sva-step').map(r => r.name)")
+    check(s0 == [3, 2] and st() == [5, 0] and fl.count() == 1 and '##[0:2]' in ta.input_value() and '5 pass' in fb and '2. ##[0:2] PREADY' in steps,
+          f'ctrl+Enter in the box: evaluated again ({s0} -> {st()}), the box still open with its results ({fb[:40]!r}) and the waves its new steps')
+    fl.locator('button[data-sv=fllist]').click()
+    li = v.locator('.sva li[data-a="apb_demo_no_wait"]')
+    check(li.locator('.ed').count() == 1 and '##[0:2] PREADY' in li.locator('code.at').inner_text(), 'In the list: its line there, marked edited, its new property')
+    ta.fill('apb_demo_no_wait: assert property (PSEL |-> );'); fl.locator('button[data-sv=apply]').click()
+    page.wait_for_function("document.querySelector('.wv .svfl .em') && document.querySelector('.wv .svfl .em').textContent")
+    em = fl.locator('.em').inner_text()
+    check('apb.sva:' in em and ta.input_value().startswith('apb_demo_no_wait: assert property (PSEL |-> );') and st() == [5, 0] and fl.locator('textarea.src:focus, button:focus').count() == 1,
+          f'a bad text in the box: said why ({em[:50]!r}), kept to fix, nothing changed, the focus still in the box')
+    page.keyboard.press('Escape')
+    check(fl.count() == 0, 'Esc closes the box')
+    # Load file… with handles (faked): the file kept, ⟳ reads it again with no dialog
+    page.evaluate("""(() => { window.__disk = { text: 'module m; endmodule\\n', picks: 0 };
+        const h = { kind: 'file', name: 'more.sva', queryPermission: async () => 'granted', getFile: async () => new File([window.__disk.text], 'more.sva') };
+        window.showOpenFilePicker = async o => { window.__disk.picks++; window.__disk.multi = o.multiple; return [h]; }; })()""")
+    page.evaluate("""window.__disk.text = 'module more_chk(input logic PCLK, input logic PSEL);\\n  more_a: assert property (@(posedge PCLK) PSEL |-> 1);\\nendmodule\\n'""")
+    v.locator('.bar button[data-sv=load]').evaluate('b => b.hidden = false'); v.locator('.bar button[data-sv=load]').click()
+    page.wait_for_function("SVA.assertions().some(a => a.label === 'more_a')")
+    page.evaluate("""window.__disk.text = window.__disk.text.replace('PSEL |-> 1', 'PSEL |-> ##1 1')""")
+    page.evaluate("SVA.panels()[0].open = true; SVA.panels()[0].render()")
+    v.locator('.sva li[data-a="more_a"] button[data-sv=reload]').click()
+    page.wait_for_function("(SVA.assertions().find(a => a.label === 'more_a') || {}).text && SVA.assertions().find(a => a.label === 'more_a').text.includes('##1')")
+    got = page.evaluate('[window.__disk.picks, window.__disk.multi, SVA.source("more.sva")]')
+    check(got == [1, True, 'handle'], f'Load file… keeps the handle: ⟳ reads more.sva again with no second dialog {got}')
+    # no handles: the File of the input read again while the page lives
+    page.evaluate("delete window.showOpenFilePicker; SVA.noHandles = true")
+    src = ROOT / 'tests' / 'sva' / 'apb.sv'
+    v.locator('.bar button[data-sv=load]').evaluate('b => b.hidden = false')
+    with page.expect_file_chooser() as fc:
+        v.locator('.bar button[data-sv=load]').click()
+    fc.value.set_files(str(src))
+    page.wait_for_function("SVA.fileList().some(f => f.name === 'apb.sv')")
+    lab = page.evaluate("SVA.assertions().find(a => SVA.statement(a.label) && SVA.statement(a.label).file === 'apb.sv').label")
+    page.evaluate("SVA.panels()[0].open = true; SVA.panels()[0].render()")
+    asked = []; page.on('filechooser', lambda f: asked.append(f))
+    v.locator(f'.sva li[data-a="{lab}"] button[data-sv=reload]').click()
+    page.wait_for_function("document.querySelector('.wv .bar .toast').textContent.includes('apb.sv: no change')")
+    check(not asked and page.evaluate('SVA.source("apb.sv")') == 'file', f'no handles: ⟳ reads the File loaded again, no dialog ({v.locator(".bar .toast").inner_text()!r})')
+    check(not errs, 'no page errors' + (': ' + ' | '.join(errs[:2]) if errs else ''))
+    ctx.close()
+
+
 def sva_report(browser, build):
     """Stage 8 in the APB page: totals and table against sva eval's report, the count filter, the failure list, exports."""
     import json, subprocess
@@ -9438,7 +9537,10 @@ def sva_bind(browser, build):
     page.goto(path.as_uri()); page.wait_for_load_state('networkidle')
     v = page.locator('.wv').first
     check(v.locator('.sva:not(.xpanel)').is_hidden() and v.locator('button[data-sv=load]').count() == 1, 'apb_all: no assertion loaded: the panel is hidden, Load file… is in the bar')
-    v.locator('input.svfile').set_input_files([str(ROOT / 'tests' / 'sva' / 'apb.sv'), str(ROOT / 'tests' / 'sva' / 'third_party' / 'saravana_apb_ahb' / 'apb_assertions.sv')])
+    page.evaluate('SVA.noHandles = true')   # (the file input: the browser's picker cannot be driven)
+    with page.expect_file_chooser() as fc:
+        v.locator('button[data-sv=load]').click()
+    fc.value.set_files([str(ROOT / 'tests' / 'sva' / 'apb.sv'), str(ROOT / 'tests' / 'sva' / 'third_party' / 'saravana_apb_ahb' / 'apb_assertions.sv')])
     page.wait_for_function("SVA.panels()[0].el.querySelectorAll('ol.asv > li[data-a]').length > 0")
     page.evaluate('SVA.ready()')
     n = v.locator('.sva ol.asv > li[data-a]').count()
@@ -11474,6 +11576,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'menus': 'the right button\'s menu in submenus: its shape in each mode (no scroll at 1280×600), Here ▸ on the axis, the keys, the pointer, its place, the tips',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
     'sva_report': 'stage 8: the report against sva eval',
+    'sva_float': '$past / $stable marks, the floating editor of an assertion, ⟳ from where Load file… read it',
     'sva_edit': 'an assertion edited in the page (✎, Apply, kept, Revert, a bad text) and read from the disk again (⟳, Watch)',
     'sva_report_hardening': 'stage 8.1: names, aliases, recovery, caps, print, mkconfig --update, make html SVA=',
     'sva_wasm': 'wavelens/sva.wasm.js is the module of the current build (make sva-build)',
@@ -11765,6 +11868,7 @@ def main():
         run('tips', tips, b, build)
         run('sva_report', sva_report, b, build)
         run('sva_edit', sva_edit, b, build)
+        run('sva_float', sva_float, b, build)
         run('sva_report_hardening', sva_report_hardening, b, build)
         b.close()
     run('sva_wasm', sva_wasm, build)

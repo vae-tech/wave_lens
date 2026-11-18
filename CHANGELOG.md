@@ -5,6 +5,26 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.64 — 18 November 2026
+
+Assertions edited where you look at them: ⟳ reads a file again from where Load file… read it, with no dialog; the
+selected attempt shows what $past, $stable, $rose … read from earlier cycles, named on a line of its own over the row;
+Edit the assertion… on its rows opens it in a box over the waves that stays open while you try.
+
+- SVA, ⟳ from where the file came (asked 2026-11-18): **Load file…** keeps each file's handle (Chrome / Edge, the File System Access
+  API; in IndexedDB per page) or, elsewhere, the File it read, so an assertion's ⟳ and Watch read it again with no dialog; a file built
+  into the page, or one never loaded, is picked the first time as before (`SVA.pickFiles`, `SVA.source(name)`).
+- SVA, the past on the waves (asked 2026-11-18): on the selected attempt (a static SVG: its focused one) a step's `$past(x[, n])`,
+  `$stable`, `$changed`, `$rose`, `$fell` mark the cycle they read — a ring there and a dashed arc to the step's circle, up through a line
+  of its own over the row (a lane, as a lifted bookmark's: `view.extraLanes`, a figure's `lanes`) where it is named (`$stable`, `$past 2`),
+  on the step's row, the rows of the signals read and their copies; nested calls add up (`$rose($past(r))`: 2 back), a
+  gated `$past` or a count that is no number is left out (`SVA.backCalls`). The step's tooltip says the cycle; **Why** shows the
+  cycles before the attempt that they read as columns of their own (in italics).
+- SVA, a floating editor (asked 2026-11-18): the right button on any row of an assertion's group on the waves — **Edit the assertion…**
+  — opens its statement in a box over the waves, dragged by its head; **Apply** (ctrl+Enter) evaluates it again and keeps the box open
+  (a bad text said there, the focus kept), its bindings with their counts, Evaluate / Unbind / Bind…, ⟳, Revert, **In the list**; the
+  list follows at once; Esc closes it. **⧉ Float** in the editor under a line moves it there.
+
 ## 0.63 — 18 November 2026
 
 Finding assertions: a search in the Assertions panel by name, signal, instance and state, the waves masked to what

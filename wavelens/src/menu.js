@@ -218,6 +218,10 @@ Object.assign(WaveView.prototype, {
     const spanB = spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` +
       b('asrange', 'As range') + b('spdel', 'Delete the span') : '';
     // the row clicked (a signal, a module, your group): its look at once, its forms in Show as ▸, your groups in Your groups ▸
+    // a row of an assertion's group on the waves (its ⚑ row, attempts, steps, its signals again): its floating editor
+    const svb = this.sva && row ? this.sva.bindingOfRow(row) : null;
+    const svaB = svb && !it ? `<div class="mh">⚑ ${esc(svb.assert)}</div>` + b('svaed', 'Edit the assertion…',
+      `${svb.assert}: its text, Apply to see the waves change, its bindings (a box of its own)`) : '';
     const rowB = !it ? '' : `<div class="mh">${esc(ugh ? `${ugh.name} · ${gk === 'divider' ? 'a divider' : 'your group'}` : it.full || it.name)}${many ?
       `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signal${sigs.length === 1 ? '' : 's'}` : ''}${hlBy ?
       `<br>highlighted with ${esc(hlBy.name)}` : ''}</div>` +
@@ -244,6 +248,7 @@ Object.assign(WaveView.prototype, {
       (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
       (gk === 'divider' ? '' : b('hide', many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? `Hide this ${gk}` : 'Hide')) +
       b('copyname', many ? `Copy the ${sigs.length} paths` : 'Copy the path') +
+      (svb ? b('svaed', 'Edit the assertion…', `${svb.assert}: its text, Apply to see the waves change, its bindings (a box of its own)`) : '') +
       (sig && !many && this.sva && this.sva.qAll().length ? b('svasig', 'Assertions on this signal', 'The Assertions panel\'s search: @ its full path') : '') +
       // your groups: its place there (or a group's among yours), into / out of a group, a new one, delete; go to any of them
       menuSub('subg', 'Your groups',
@@ -311,7 +316,7 @@ Object.assign(WaveView.prototype, {
       (this.scopes().length ? b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
         (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') + '<hr>' +
       (this.fsms().length ? b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : ''));
-    el.innerHTML = [dlB, lnB, mkB, rangeB, spanB, rowB, hereB + picB + gapsB + cycB + modB].filter(Boolean).join('<hr>');
+    el.innerHTML = [dlB, lnB, mkB, rangeB, spanB, svaB, rowB, hereB + picB + gapsB + cycB + modB].filter(Boolean).join('<hr>');
     this.root.append(el); this.menuEl = el; hexFields(el);   // each colour with its hex code
     const box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
@@ -383,6 +388,7 @@ Object.assign(WaveView.prototype, {
           this.changed(true); }, '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
+      else if (act === 'svaed') { this.closeMenu(); this.sva.floatEdit(svb.assert, [cx, cy]); return this; }
       else if (act === 'svasig') { this.closeMenu(); this.sva.onSignal((sig0.of || sig0).full); return this; }   // (a bit: its bus)
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
       else if (act === 'copylink') {   // the place clicked (on a signal: snapped as Bookmark here), M-08

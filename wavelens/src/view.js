@@ -108,6 +108,7 @@ class WaveView {
     // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
     this.extraKeep = null;
     this.extraMarks = [];   // plugins: functions -> the times they mark on the waves ([{spans, color, label, mark, on}]: paintTimeMarks)
+    this.extraLanes = [];   // plugins: functions -> [{row (or signal: its full name), lane: an id}]: a line of a lane over that row (arrowLanes)
     this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavelens:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
     this.rowMarks = new Map(); this.rowTitles = new Map();   // plugins: classes and tooltips of name rows (rowClass, rowTitle)
@@ -1425,7 +1426,8 @@ class WaveView {
     return hi != null && val(hi) > (typeof hi === 'object' ? hi.cycles : hi) ? `✗ > ${f(hi)}` : `✗ < ${f(lo)}`;
   }
   // what takes a lane: the markers' texts, and the Δ between them
-  laneMarks() { const ms = this.markers.filter(m => !m.hidden);
+  laneMarks() { const ms = this.markers.filter(m => !m.hidden).concat(this.extraLanes.flatMap(f => plugSafe(f, this, 'a plugin\'s lanes', null) || [])
+      .map(x => ({ signal: x.signal, row: x.row, lane: x.lane, lift: true })));
     return this.deltas ? ms.concat(this.deltaList().map(d => ({ delta: true, level: d.level, signal: d.a.dsignal,
       lift: d.a.dsignal ? d.a.dlift || true : false }))) : ms; }
   // what is on the line between the rows at y: Δ arrows (their markers), markers' texts, bookmarks, an arrow's label -> {id, ds, ms, bs, as, n} or null

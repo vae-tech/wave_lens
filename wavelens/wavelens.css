@@ -438,6 +438,7 @@
 .wv .sva table.svw-t td.t { color: var(--sva-pass); font-weight: 600; }
 .wv .sva table.svw-t td.f { color: var(--muted); }
 .wv .sva table.svw-t td.x { color: var(--sva-fail); }
+.wv .sva table.svw-t td.pre, .wv .sva table.svw-t th.pre { opacity: 0.6; font-style: italic; }   /* before the attempt: what its $past, $stable … read */
 .wv .sva table.svw-t td.hit { box-shadow: inset 0 0 0 1.5px var(--sva-pass); border-radius: 8px; }
 .wv .sva table.svw-t td.miss { background: color-mix(in srgb, var(--sva-fail) 22%, transparent); box-shadow: inset 0 0 0 1.5px var(--sva-fail); color: var(--sva-fail); font-weight: 700; }
 .wv .sva .svx { display: inline-flex; gap: 4px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
@@ -852,3 +853,14 @@
 .wv .wv-arrd .ari .ck { width: 1.2em; }
 .wv .wv-arrd .arlive { min-height: 1.4em; margin-top: 6px; color: var(--accent); font-size: 11.5px; }
 .wv .wv-arrd .arb { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+/* the floating editor of an assertion (sva.js floatEdit: Edit the assertion… on its rows): dragged by its head */
+.wv .sva.svfl { position: fixed; z-index: 46; width: min(620px, calc(100vw - 12px)); max-height: calc(100vh - 12px); overflow: auto; box-sizing: border-box;
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28); padding: 0 10px 8px; }
+.wv .sva.svfl .flh { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin: 0 -10px 6px; padding: 5px 10px; cursor: move;
+  user-select: none; background: var(--panel-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+.wv .sva.svfl .flh .muted { color: var(--muted); font-size: 11.5px; margin-right: auto; }
+.wv .sva.svfl .flh .grip { color: var(--muted); }
+.wv .sva.svfl .flbs { display: grid; gap: 4px; margin-top: 6px; }
+.wv .sva.svfl .fb1 { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; padding-top: 4px; border-top: 1px dashed var(--line); }
+.wv .sva.svfl .flbs > .ab { justify-self: start; }
+.wv .sva ol.asv > li.flash { outline: 2px solid var(--accent); outline-offset: -2px; }

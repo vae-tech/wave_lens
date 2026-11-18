@@ -2523,7 +2523,8 @@ function arrowLanes(rows, bms, arrows, marks = []) {
   rows.forEach((r, i) => { if (r.type === 'sig' && r.ug && !idx.has(r.full)) idx.set(r.full, i); });   // in your group first (paintBookmarks)
   rows.forEach((r, i) => { if (r.type === 'sig' && !r.same && !idx.has(r.full)) idx.set(r.full, i); });
   rows.forEach((r, i) => { if (r.type === 'sig' && r.same && !idx.has(r.full)) idx.set(r.full, i); });   // copies: when the original is not shown
-  const rowAt = o => (o && o.signal != null && idx.has(o.signal) ? idx.get(o.signal) : -1), rowOf = n => rowAt(bms.find(x => x.n === n));
+  const rowAt = o => (o && o.row ? rows.indexOf(o.row) : o && o.signal != null && idx.has(o.signal) ? idx.get(o.signal) : -1);   // (a plugin's: the row itself)
+  const rowOf = n => rowAt(bms.find(x => x.n === n));
   arrows.forEach((a, i) => {
     if (!a.label || !has(a.from) || !has(a.to)) return;
     const r1 = rowOf(a.from), r2 = rowOf(a.to), at = Math.max(-1, r1 === r2 ? r1 - 1 : Math.min(r1, r2));
@@ -2542,7 +2543,8 @@ function arrowLanes(rows, bms, arrows, marks = []) {
   }
   return lanes;
 }
-const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark, of a marker's text
+// the lane of a lifted bookmark, of a marker's text; a plugin's line of its own over a row: its `lane` (view.extraLanes)
+const laneId = b => b.lane || 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');
 function withLanes(rows, lanes) { // rows with {type: 'lane', ids: [arrow index]} rows spliced in
   const out = [], lane = i => { if (lanes.has(i)) out.push({ type: 'lane', ids: lanes.get(i), name: '', depth: 0, anc: [] }); };
   lane(-1); rows.forEach((r, i) => { out.push(r); lane(i); });
@@ -2577,7 +2579,7 @@ function layoutRows(rows, rh, laneH, y = 0) {
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
 const laneKey = (bms, arrows, marks) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]),
   (arrows || []).map(a => [a.from, a.to, !!a.label]),
-  (marks || []).map(m => [m.signal || null, m.lift || false, m.delta ? 1 + (m.level || 0) : 0])]);
+  (marks || []).map(m => [m.signal || null, m.lift || false, m.delta ? 1 + (m.level || 0) : 0, m.lane || 0])]);
 const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
   return m; };
 // an arrow's label with its placeholders filled at the times of its ends: {dt} the time between them (cycles, "3T", in
@@ -2797,6 +2799,7 @@ const TIPS = {
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
   'm:mark': ['Bookmark on this signal here: its label asked here, its text in the list', ['b']],
+  'm:svaed': ['The assertion of these rows in a box of its own: its text, Apply, its bindings'],
   'm:copyname': ['Copy the path', ['yy']], 'm:copylink': ['Copy a link to this moment: the page opened by it goes here', ['yl']],
   'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
@@ -3798,6 +3801,7 @@ class WaveView {
     // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
     this.extraKeep = null;
     this.extraMarks = [];   // plugins: functions -> the times they mark on the waves ([{spans, color, label, mark, on}]: paintTimeMarks)
+    this.extraLanes = [];   // plugins: functions -> [{row (or signal: its full name), lane: an id}]: a line of a lane over that row (arrowLanes)
     this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavelens:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
     this.rowMarks = new Map(); this.rowTitles = new Map();   // plugins: classes and tooltips of name rows (rowClass, rowTitle)
@@ -5115,7 +5119,8 @@ class WaveView {
     return hi != null && val(hi) > (typeof hi === 'object' ? hi.cycles : hi) ? `✗ > ${f(hi)}` : `✗ < ${f(lo)}`;
   }
   // what takes a lane: the markers' texts, and the Δ between them
-  laneMarks() { const ms = this.markers.filter(m => !m.hidden);
+  laneMarks() { const ms = this.markers.filter(m => !m.hidden).concat(this.extraLanes.flatMap(f => plugSafe(f, this, 'a plugin\'s lanes', null) || [])
+      .map(x => ({ signal: x.signal, row: x.row, lane: x.lane, lift: true })));
     return this.deltas ? ms.concat(this.deltaList().map(d => ({ delta: true, level: d.level, signal: d.a.dsignal,
       lift: d.a.dsignal ? d.a.dlift || true : false }))) : ms; }
   // what is on the line between the rows at y: Δ arrows (their markers), markers' texts, bookmarks, an arrow's label -> {id, ds, ms, bs, as, n} or null
@@ -6385,6 +6390,10 @@ Object.assign(WaveView.prototype, {
     const spanB = spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` +
       b('asrange', 'As range') + b('spdel', 'Delete the span') : '';
     // the row clicked (a signal, a module, your group): its look at once, its forms in Show as ▸, your groups in Your groups ▸
+    // a row of an assertion's group on the waves (its ⚑ row, attempts, steps, its signals again): its floating editor
+    const svb = this.sva && row ? this.sva.bindingOfRow(row) : null;
+    const svaB = svb && !it ? `<div class="mh">⚑ ${esc(svb.assert)}</div>` + b('svaed', 'Edit the assertion…',
+      `${svb.assert}: its text, Apply to see the waves change, its bindings (a box of its own)`) : '';
     const rowB = !it ? '' : `<div class="mh">${esc(ugh ? `${ugh.name} · ${gk === 'divider' ? 'a divider' : 'your group'}` : it.full || it.name)}${many ?
       `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signal${sigs.length === 1 ? '' : 's'}` : ''}${hlBy ?
       `<br>highlighted with ${esc(hlBy.name)}` : ''}</div>` +
@@ -6411,6 +6420,7 @@ Object.assign(WaveView.prototype, {
       (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
       (gk === 'divider' ? '' : b('hide', many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? `Hide this ${gk}` : 'Hide')) +
       b('copyname', many ? `Copy the ${sigs.length} paths` : 'Copy the path') +
+      (svb ? b('svaed', 'Edit the assertion…', `${svb.assert}: its text, Apply to see the waves change, its bindings (a box of its own)`) : '') +
       (sig && !many && this.sva && this.sva.qAll().length ? b('svasig', 'Assertions on this signal', 'The Assertions panel\'s search: @ its full path') : '') +
       // your groups: its place there (or a group's among yours), into / out of a group, a new one, delete; go to any of them
       menuSub('subg', 'Your groups',
@@ -6478,7 +6488,7 @@ Object.assign(WaveView.prototype, {
       (this.scopes().length ? b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
         (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') + '<hr>' +
       (this.fsms().length ? b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : ''));
-    el.innerHTML = [dlB, lnB, mkB, rangeB, spanB, rowB, hereB + picB + gapsB + cycB + modB].filter(Boolean).join('<hr>');
+    el.innerHTML = [dlB, lnB, mkB, rangeB, spanB, svaB, rowB, hereB + picB + gapsB + cycB + modB].filter(Boolean).join('<hr>');
     this.root.append(el); this.menuEl = el; hexFields(el);   // each colour with its hex code
     const box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
@@ -6550,6 +6560,7 @@ Object.assign(WaveView.prototype, {
           this.changed(true); }, '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
+      else if (act === 'svaed') { this.closeMenu(); this.sva.floatEdit(svb.assert, [cx, cy]); return this; }
       else if (act === 'svasig') { this.closeMenu(); this.sva.onSignal((sig0.of || sig0).full); return this; }   // (a bit: its bus)
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
       else if (act === 'copylink') {   // the place clicked (on a signal: snapped as Bookmark here), M-08
@@ -11976,7 +11987,9 @@ const WaveSVG = {
       timeMarks = extra.flatMap(f => (f.marks ? f.marks() : []));   // a plugin's times, as view.extraMarks
       keeps = extra.map(f => (f.keeps ? f.keeps() : null)).find(Boolean) || null;   // the stretches it keeps, as view.extraKeep
       const all = withExtra(sorted, extra, M, opts.owner || M);
-      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks);
+      // a plugin's lines over its rows, as view.extraLanes
+      const lanes = extra.flatMap(f => (f.lanes ? f.lanes() : [])).map(x => ({ signal: x.signal, row: x.row, lane: x.lane, lift: true }));
+      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks.concat(lanes));
     }
     const hl = C.hl;
     // gaps (opts.cuts, a plugin's stretches, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
@@ -12332,7 +12345,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.63',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.64',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

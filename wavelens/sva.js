@@ -238,7 +238,7 @@ function rowSampler(rows) {
     width: name => rows[name] ? rowWidth(rows[name]) : null,
   };
 }
-Object.assign(SVA, { load, plan, assemble, tvSampler, rowSampler, fromLabel });
+Object.assign(SVA, { load, plan, assemble, tvSampler, rowSampler, fromLabel, backCalls: l => backCalls(l) });
 
 // the tooltips of the panel's and the bar's controls (WaveLens.tips): what each does, its keys
 if (G.WaveLens && G.WaveLens.tips) G.WaveLens.tips.add({
@@ -249,7 +249,9 @@ if (G.WaveLens && G.WaveLens.tips) G.WaveLens.tips.add({
   'sv:clear': ['Forget this browser\'s files and bindings'], 'sv:table': ['One row per binding: counts, failures, latency'],
   'sv:fails': ['Every failed attempt by time'], 'sv:xmd': ['Download the report as Markdown'], 'sv:xjson': ['Download the results as JSON'],
   'sv:bind': ['Bind to an instance', ['drag the line onto a module']], 'sv:edit': ['Edit it here', ['ctrl+Enter', 'Esc']],
-  'sv:reload': ['Read its file from the disk again'], 'sv:del': ['Remove it from the list'], 'sv:eval': ['Evaluate again'],
+  'sv:reload': ['Read its file again from where it was loaded'], 'sv:float': ['Edit it in a box of its own over the waves'],
+  'sv:fllist': ['Its line in the Assertions panel'], 'sv:flclose': ['Close the box', ['Esc']], 'sv:del': ['Remove it from the list'],
+  'sv:eval': ['Evaluate again'],
   'sv:fail': ['Go to the first failure', [']f']], 'sv:unbind': ['Remove this binding'], 'sv:apply': ['Parse and evaluate', ['ctrl+Enter']],
   'sv:noedit': ['Cancel', ['Esc']], 'sv:revert': ['Back to the page\'s file'], 'sv:nopick': ['Close'], 'sv:to': ['Bind to this instance'],
   'sv:go': ['Go to this attempt'], 'sv:only': ['Only these attempts (again: all)'], 'sv:wt': ['The cursor to this cycle'], 'sv:nowhy': ['Close Why', ['Esc']],
@@ -417,10 +419,12 @@ SVA.edit = async (label, text) => {
   }
   return { ok: true, errors: [] };
 };
-// ⟳ and Watch: a file read from the disk again. With the File System Access API (Chromium) the file is picked once and
-// its handle kept (here and in IndexedDB, so a reload of the page asks only for the permission); elsewhere ⟳ asks for
-// the file every time. The text replaces the file of that name (the page's or this browser's).
-const HANDLES = new Map(), MTIME = new Map();
+// ⟳ and Watch: a file read from the disk again, from where it was loaded. With the File System Access API (Chromium)
+// Load file… keeps each file's handle (here and in IndexedDB, so a reload of the page asks only for the permission) and ⟳
+// reads it with no dialog; elsewhere the File loaded is read again while the page lives (a browser that cannot: picked
+// again). A file of the page itself (mkhtml), or one never loaded here, is picked the first time. The text replaces the
+// file of that name (the page's or this browser's).
+const HANDLES = new Map(), MTIME = new Map(), FILES = new Map();   // FILES: name -> the File of a file input (no handles)
 const idb = (mode, fn) => new Promise((ok, no) => {
   if (!G.indexedDB) return no(new Error('no IndexedDB'));
   const rq = G.indexedDB.open('wavelens-sva', 1);
@@ -429,21 +433,45 @@ const idb = (mode, fn) => new Promise((ok, no) => {
   rq.onsuccess = () => { try { const t = rq.result.transaction('handles', mode), q = fn(t.objectStore('handles')); t.oncomplete = () => ok(q && q.result);
     t.onerror = () => no(t.error); } catch (e) { no(e); } };
 });
-const pickFile = name => G.showOpenFilePicker
-  ? G.showOpenFilePicker({ multiple: false, id: 'wavelens-sva', types: [{ description: 'SystemVerilog',
-    accept: { 'text/plain': ['.sv', '.sva', '.svh', '.v', '.vh'] } }] }).then(([h]) => h)
-  : new Promise((ok, no) => {   // no handles in this browser: a file input, the file read once
-    const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.sv,.sva,.svh,.v,.vh,.txt' });
-    inp.addEventListener('change', () => inp.files[0] ? ok({ name: inp.files[0].name, getFile: async () => inp.files[0],
-      once: true }) : no(new Error('no file chosen')));
-    inp.click();
-  });
+const hkey = name => (G.location ? G.location.pathname : '') + ':' + name;   // per page: another project's checks.sv is another file
+const SV_TYPES = [{ description: 'SystemVerilog', accept: { 'text/plain': ['.sv', '.sva', '.svh', '.v', '.vh'] } }];
+const inputFiles = (multiple) => new Promise((ok, no) => {   // no handles in this browser: a file input
+  const inp = Object.assign(document.createElement('input'), { type: 'file', multiple, accept: '.sv,.sva,.svh,.v,.vh,.txt' });
+  inp.addEventListener('change', () => (inp.files.length ? ok([...inp.files]) : no(new Error('no file chosen'))));
+  inp.click();
+});
+async function keepHandle(name, h) {
+  HANDLES.set(name, h); FILES.delete(name);
+  try { await idb('readwrite', st => st.put(h, hkey(name))); } catch (e) { /* not kept: picked again after a reload of the page */ }
+}
+// Load file…: the files picked -> [File]; each kept by its name to be read again by ⟳ and Watch ([] when cancelled)
+SVA.pickFiles = async () => {
+  if (G.showOpenFilePicker && !SVA.noHandles) {
+    let hs = null;
+    try { hs = await G.showOpenFilePicker({ multiple: true, id: 'wavelens-sva', types: SV_TYPES }); } catch (e) { if (e.name === 'AbortError') return []; }
+    if (hs) {   // (a picker refused in a frame or a webview: the file input below)
+      const out = [];
+      for (const h of hs) { const f = await h.getFile(); await keepHandle(f.name, h); MTIME.set(f.name, f.lastModified); out.push(f); }
+      return out;
+    }
+  }
+  let fs; try { fs = await inputFiles(true); } catch (e) { return []; }
+  for (const f of fs) FILES.set(f.name, f);
+  return fs;
+};
+// where ⟳ reads `name` from: 'handle', 'file' (the File loaded in this page), or null (it asks for the file)
+SVA.source = name => (HANDLES.has(name) ? 'handle' : FILES.has(name) ? 'file' : null);
+const pickFile = name => (G.showOpenFilePicker && !SVA.noHandles
+  ? G.showOpenFilePicker({ multiple: false, id: 'wavelens-sva', types: SV_TYPES }).then(([h]) => h)
+  : inputFiles(false).then(([f]) => { FILES.set(name, f); return { name: f.name, getFile: async () => f, once: true }; }));
 async function handleOf(name, pick) {
   let h = HANDLES.get(name);
-  const key = (G.location ? G.location.pathname : '') + ':' + name;   // per page: another project's checks.sv is another file
-  if (!h) { try { h = await idb('readonly', st => st.get(key)); } catch (e) { h = null; } }
-  if (!h && pick) { h = await pickFile(name); if (!h.once) { try { await idb('readwrite', st => st.put(h, key));
-    } catch (e) { /* not kept: picked again after a reload */ } } }
+  if (!h) { try { h = await idb('readonly', st => st.get(hkey(name))); } catch (e) { h = null; } }
+  if (!h && FILES.has(name)) {   // the File loaded: read again (a browser that keeps it a snapshot refuses: picked again)
+    const f = FILES.get(name);
+    try { await f.slice(0, 1).text(); return { name: f.name, getFile: async () => f, once: true }; } catch (e) { FILES.delete(name); }
+  }
+  if (!h && pick) { h = await pickFile(name); if (!h.once) await keepHandle(name, h); }
   if (h && h.queryPermission && (await h.queryPermission({ mode: 'read' })) !== 'granted' &&
     (await h.requestPermission({ mode: 'read' })) !== 'granted') throw new Error(`no permission to read ${name}`);
   if (h && !h.once) HANDLES.set(name, h);
@@ -822,6 +850,35 @@ function propParts(text) {
 SVA.propParts = propParts;
 // the names of the assertion (a Set) that a step's label reads, in the order they come: strings, based literals and
 // system functions are no names; `a.b` is a.b or else a
+// The sampled-value functions of a step's boolean that read an earlier cycle (LANGUAGE.md): $past(e[, n]) reads e n
+// cycles back, $stable $changed $rose $fell compare e with the cycle before. -> [{fn, arg, back, text}] in source order;
+// back: how far its signals are read, the calls inside it added ($rose($past(a)): a 2 back for $rose, 1 for $past). A
+// $past with a gating expression or its own clock (its cycles are not this clock's), a count that is no number: left out
+const PAST_LANE = 'sva-past:', PAST_IDS = new WeakMap();   // the id of a row's line of its own (a copy has the full name of its signal)
+const pastLane = r => { if (!PAST_IDS.has(r)) PAST_IDS.set(r, PAST_LANE + G.WaveLens.rowId()); return PAST_IDS.get(r); };
+const BACK_FNS = /\$(past|stable|changed|rose|fell)\s*\(/g;
+const constInt = t => { const m = /^(?:(\d+)|\d*'[sS]?([dDhHbBoO])\s*([0-9a-fA-F_]+))$/.exec(String(t).trim()); if (!m) return null;
+  if (m[1] != null) return +m[1]; const v = parseInt(m[3].replace(/_/g, ''), { d: 10, h: 16, b: 2, o: 8 }[m[2].toLowerCase()]);
+  return Number.isFinite(v) ? v : null; };
+function backCalls(label) {
+  const src = String(label || ''), calls = [];
+  for (const m of src.matchAll(BACK_FNS)) {
+    const args = []; let d = 0, i = m.index + m[0].length, from = i;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) { if (!d) break; d--; } else if (c === ',' && !d) { args.push(src.slice(from, i)); from = i + 1; }
+    }
+    args.push(src.slice(from, i));
+    const fn = m[1].toLowerCase(), n = fn === 'past' && args[1] != null && args[1].trim() ? constInt(args[1]) : 1;
+    calls.push({ fn, arg: args[0].trim(), s: m.index, e: i, n, ok: n != null && n > 0 && (fn !== 'past' || args.length <= 2) });
+  }
+  for (const c of [...calls].sort((a, b) => (a.e - a.s) - (b.e - b.s))) {   // the inner ones first
+    const inner = calls.filter(o => o !== c && o.s > c.s && o.e < c.e);
+    c.back = inner.some(o => !o.ok) ? null : (c.n || 0) + Math.max(0, ...inner.map(o => o.back));
+  }
+  return calls.filter(c => c.ok && c.back != null).map(c => ({ fn: c.fn, arg: c.arg, back: c.back,
+    text: c.fn === 'past' ? `$past${c.back > 1 ? ' ' + c.back : ''}` : '$' + c.fn + (c.back > 1 ? ' ' + c.back : '') }));
+}
 function stepSignals(label, names) {
   const out = [], src = label.replace(/"(?:[^"\\]|\\.)*"/g, ' ').replace(/\d*'[sS]?[bodhBODH]\s*[\w?]+/g, ' ');
   for (const w of src.matchAll(/\$?[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*/g)) {
@@ -1009,7 +1066,8 @@ function assertionRows(st, res, opt) {
         const h = dotAt(this.hits, px); if (!h) return '';
         const p = h[1], v = p.v != null ? ` = ${typeof p.v === 'number' ? '0x' + p.v.toString(16) : p.v}` : '';
         return p.fail ? `${stp.label}: ${p.x.a.note || why(p.x.a)} — ${tip(p.x, view, false)}` :
-          `step ${k + 1} ${stp.label} at cycle ${p.c}${v} — ${tip(p.x, view)}`;
+          `step ${k + 1} ${stp.label} at cycle ${p.c}${v}${backs[k].map(c => ` · ${c.text}(${c.arg}): cycle ${p.c - c.back}`).join('')}` +
+            ` — ${tip(p.x, view)}`;
       },
       value: () => '' });
   });
@@ -1027,6 +1085,17 @@ function assertionRows(st, res, opt) {
   const reads = m.steps.map(stp => { const rs = stepSignals(stp.label, names).map(n => map[n]);
     return { src: rs, cp: rs.map(r => cpOf.get(r)).filter(Boolean) }; });
   const marked = [...new Set(reads.flatMap(x => x.src))];
+  // what each step reads from earlier cycles ($past, $stable …), with the rows of their signals: marked on the focused attempt
+  const backs = m.steps.map(stp => backCalls(stp.label).map(c => { const rs = stepSignals(c.arg, names).map(n => map[n]);
+    return Object.assign(c, { src: rs, cp: rs.map(r => cpOf.get(r)).filter(Boolean) }); }));
+  // the rows over which attempt i names what it reads from earlier cycles: a line of a lane of their own (view.extraLanes)
+  st.lanesOf = i => {
+    const x = i >= 0 ? m.atts.find(a => a.i === i) : null, out = new Set(); if (!x) return [];
+    for (const p of x.fail ? x.pts.concat(x.fail) : x.pts) {
+      for (const c of backs[p.s] || []) { out.add(steps[p.s]); for (const r of c.src.concat(c.cp)) if (r) out.add(r); }
+    }
+    return [...out].map(r => ({ row: r, lane: pastLane(r) }));
+  };
   // arrows along the traces: every attempt on screen when there are few (the static SVG: all), the selected one in front;
   // the selected attempt (the static SVG: focusOf) also on the signals its steps read, its start and end as dashed lines
   // across the rows with flags in the group's band: ▶ start, and how it ended (✓ pass, ✕ fail, … not ended)
@@ -1100,6 +1169,47 @@ function assertionRows(st, res, opt) {
       }
       for (const [x, y, p] of dots) if (x >= xL - 8 && x <= xR + 8) { dot(P, x, y, p, false, true); flow.push({ on: set, s: p.s + 1, fail: !!p.fail, x, y }); }
     }
+    // what the focused attempt's steps read from earlier cycles: on the step's row and on the rows of the signals read, a
+    // ring at the cycle read and a dashed arc from it to the step's point, named by the function ($past 2, $stable …)
+    if (fx) {
+      const pts = fx.fail ? fx.pts.concat(fx.fail) : fx.pts, back = g.back = [], done = new Set(), LH = S.laneHeight || 16;
+      // the line of its own lane over a row (st.lanesOf): the arc goes up to it and its name stands there, over no wave
+      const laneOver = row => { const q = pos.get(row); if (!q) return null;
+        for (const o of pos.values()) if (o.row.type === 'lane' && Math.abs(o.y + o.h - q.y) < 1) {
+          const k = o.row.ids.indexOf(pastLane(row)); if (k >= 0) return o.y + LH * k + LH / 2; }
+        return null; };
+      const mark = (row, xa, xb, text, onRow) => {
+        const y = ym(row), k = `${Math.round(y)}:${Math.round(xa)}:${Math.round(xb)}:${text}`;   // ($stable(a) && $stable(b): one mark on the step's row)
+        if (xb < xL - 8 || xa > xR + 8 || done.has(k)) return;
+        done.add(k);
+        const yl = laneOver(row), r = 4.5, tw = P.measure(text, { size: 9 });
+        if (yl != null) {   // up into the lane: the arc's top on its line, the name over it
+          const c = (8 * yl - 2 * y + r + 8) / 6;   // (the control points that put the curve's middle on yl)
+          if (xb - xa >= 4) { P.path([['M', xa, y - r], ['C', xa, c, xb, c, xb, y - 8]], { stroke: 'acc', w: 1.2, dash: [3, 2] });
+            G.WaveLens.paint.arrowHead(P, xb, y - 7, xb, y - 14, 'acc'); }
+          P.path(circlePath(xa, y, r), { stroke: 'acc', w: 1.5, fill: 'panel' });
+          // the name on the lane's line, left of the cycle read (the middle is the trace's: its arrow's 1T)
+          P.rect(xa - tw - 8, yl - 6, tw + 6, 12, 'panel'); P.text(xa - 5, yl + 0.5, text, { anchor: 'end', size: 9, weight: 600, fill: 'acc' });
+        } else {   // no lane over it (a copy of a signal): inside the row, the name left of the ring
+          const up = Math.min(9, Math.max(6, (xb - xa) / 4));
+          if (xb - xa >= 10) {
+            P.path([['M', xa, y - r], ['C', xa, y - up - 3, xb, y - up - 3, xb, y - 8]], { stroke: 'acc', w: 1.2, dash: [3, 2] });
+            G.WaveLens.paint.arrowHead(P, xb, y - 7, xb - 1, y - up, 'acc');
+          }
+          P.path(circlePath(xa, y, r), { stroke: 'acc', w: 1.5, fill: 'panel' });
+          const bx = xa - r - 3 - tw - 4;
+          P.rect(bx, y - 6, tw + 4, 12, 'panel', 0.85); P.text(bx + 2, y + 0.5, text, { size: 9, weight: 600, fill: 'acc' });
+        }
+        back.push({ on: onRow, text, xa, xb, y, lane: yl != null });
+      };
+      for (const p of pts) for (const c of backs[p.s] || []) {
+        const c0 = p.c - c.back, before = c0 < 0, ta = m.T[Math.max(c0, 0)];
+        if (ta == null) continue;
+        const xa = X(ta) - (before ? 6 : 0), xb = X(p.t), text = before ? `${c.text} (before cycle 0)` : c.text;
+        if (ym(steps[p.s]) != null && seen(steps[p.s])) mark(steps[p.s], xa, xb, text, 'step');
+        for (const set of ['src', 'cp']) for (const rr of c[set]) if (rr && pos.has(rr) && seen(rr)) mark(rr, xa, xb, text, set);
+      }
+    }
     // labels last: the selected attempt's first, the others where no label is yet
     const boxes = [];
     for (const l of labels.sort((a, b) => b.front - a.front)) {
@@ -1129,11 +1239,9 @@ class Panel {
           '<button type="button" data-sv="fnext" aria-label="next failure" disabled>▶</button><button type="button" class="pop svf" data-pop="svaf" ' +
           'aria-haspopup="menu" aria-expanded="false" aria-label="the failures by name">▾</button></span>' +
           '<div class="bpop svj" data-pop="svaf" role="menu" hidden></div>') +
-        ('<button type="button" data-sv="load">Load file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>'));
+        '<button type="button" data-sv="load">Load file…</button>');
       g.classList.add('sv'); g.querySelector('.tl').textContent = 'SVA';
-      const inp = g.querySelector('input.svfile');
-      g.querySelector('button[data-sv=load]').addEventListener('click', () => inp.click());
-      inp.addEventListener('change', () => { const fs = [...inp.files]; inp.value = ''; if (fs.length) this.load(fs); });
+      g.querySelector('button[data-sv=load]').addEventListener('click', async () => { const fs = await SVA.pickFiles(); if (fs.length) this.load(fs); });
       g.addEventListener('click', e => { const b = e.target.closest('button[data-sv=fprev], button[data-sv=fnext]');
         if (b) this.step(b.dataset.sv === 'fnext' ? 1 : -1); });
       this.walkG = g; this.jumpEl = g.querySelector('.svj');
@@ -1167,10 +1275,15 @@ class Panel {
     this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value;
       this.fillSummary(this.el.querySelector('.svr'), 'fails'); } });
     if (v.extraRows) v.extraRows.push(g => this.rowsFor(g));
+    // the selected attempt's $past, $stable …: a line of a lane over the rows they are named on
+    if (v.extraLanes) v.extraLanes.push(() => { const s = this.selA, d = s && s.b.draw;
+      return d && d.lanesOf && this.drawn().includes(s.b) ? d.lanesOf(s.i) : []; });
     v.addKey(']f', () => this.step(1), ']f [f next / previous assertion failure').addKey('[f', () => this.step(-1));
     v.addKey(']a', () => this.stepAssert(1), ']a [a next / previous assertion').addKey('[a', () => this.stepAssert(-1));
     v.root.addEventListener('wavelens:reset', () => this.unselect(false), { signal: v.ac.signal });
-    v.root.addEventListener('wavelens:destroy', () => { this.bindings.forEach(b => this.winStop(b)); LIB.panels.delete(this); this.el.remove(); v.sva = null; },
+    v.root.addEventListener('wavelens:destroy', () => { this.bindings.forEach(b => this.winStop(b)); LIB.panels.delete(this); this.el.remove();
+      this.floatClose();
+      v.sva = null; },
       { once: true });
     // this browser's bindings, with the page's that are new since (the ones the user unbound stay away)
     this.saved = store.get(this.key) || {};
@@ -1548,8 +1661,10 @@ class Panel {
       const p = plan(SOURCES(), [x.a], rowSampler(b.res.map), v.M.timed ? 'ps' : 'cycles')[0], E = p.edges || [], T = o.cycles || b.results.cycles;
       const last = Math.max(a.end, a.failed_at ?? a.end), t0 = T[a.start], from = E.indexOf(t0);
       if (from < 0) { say('this attempt is outside the waves of this view'); return; }
+      // the cycles before the start that a $past, $stable … of it reads: columns of their own, before the attempt's
+      const pre = Math.min(from, a.start, Math.max(0, ...(o.steps || []).flatMap(st => backCalls(st.label).map(c => c.back))));
       const n = Math.min(last - a.start + 1, Panel.WHY_CYCLES), to = from + n - 1;
-      const req = { files: p.req.files, trace: p.req.trace, explain: { assert: x.a.label, from, to } };
+      const req = { files: p.req.files, trace: p.req.trace, explain: { assert: x.a.label, from: from - pre, to } };
       const out = (await SVA.engine()).call(req);
       if (this.whyKey !== key) return;
       if (out.errors) { say(out.errors.map(e => e.msg).join('; ')); return; }
@@ -1560,7 +1675,7 @@ class Panel {
         const txt = w === 1 ? String(val) : typeof val === 'number' ? (val < 10 ? String(val) : '0x' + val.toString(16)) : /^h/.test(val) ? '0x' +
           val.slice(1) : val;
         const k = id ? `${id}@${c}` : '';
-        return `<td class="${t}${k && hit.has(k) ? ' hit' : ''}${k && k === miss ? ' miss' : ''}"
+        return `<td class="${t}${c < a.start ? ' pre' : ''}${k && hit.has(k) ? ' hit' : ''}${k && k === miss ? ' miss' : ''}"
           title="${esc(String(txt))}">${esc(cut(String(txt), 10))}</td>`;
       };
       const rows = [];
@@ -1569,13 +1684,14 @@ class Panel {
         const role = top ? (top.id && num.has(top.id) ? num.get(top.id)[1] : top.what) : '';
         rows.push((`<tr class="${top ? 'top' : ''}"><th scope="row" style="padding-left:${0.4 + depth * 1.1}em" ` +
             `title="${esc(nd.text)}">${esc(cut(lab, 60))}${role ? ` <span
-              class="muted">${esc(role)}</span>` : ''}</th>${nd.values.map((val, k) => cell(val, nd.w, top && top.id, a.start + k)).join('')}</tr>`));
+              class="muted">${esc(role)}</span>` : ''}</th>${nd.values.map((val, k) => cell(val, nd.w, top && top.id, a.start - pre + k)).join('')}</tr>`));
         for (const kid of nd.kids || []) walk(kid, depth + 1, null);
       };
       for (const bl of out.explain) walk(bl.tree, 0, bl);
-      const cols = Array.from({ length: n }, (_, k) =>
-        (`<th scope="col"><button type="button" data-sv="wt" data-t="${E[from + k]}" title="${esc(v.when(E[from + k]))}: the cursor ` +
-          `there">${a.start + k}</button></th>`)).join('');
+      const cols = Array.from({ length: n + pre }, (_, k) =>
+        (`<th scope="col"${k < pre ? ' class="pre"' : ''}><button type="button" data-sv="wt" data-t="${E[from - pre + k]}" ` +
+          `title="${esc(v.when(E[from - pre + k]))}: the cursor there${k < pre ? ' (before the attempt: what its $past, $stable … read)' : ''}` +
+          `">${a.start - pre + k}</button></th>`)).join('');
       this.why = head +
         (`<div class="ww"><table class="svw-t"><thead><tr><th scope="col" ` +
           `class="muted">cycle</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`) +
@@ -1689,18 +1805,28 @@ class Panel {
       aria-label="the statement of ${esc(a.label)}">${esc(st)}</textarea>
       <span class="eb"><button type="button" data-sv="apply"
         title="Parse it and evaluate its bindings again (ctrl+Enter); kept in this browser">Apply</button><button type="button"
-          data-sv="noedit">Cancel</button>${file.shadows ? `<button type="button" data-sv="revert"
+          data-sv="noedit">Cancel</button><button type="button" data-sv="float"
+            title="In a box of its own over the waves: moved where you look, Apply keeps it open">⧉ Float</button>${file.shadows ?
+              `<button type="button" data-sv="revert"
             title="Forget this browser's ${esc(file.name)}: the page's file comes back">Revert to the page's</button>` : ''}
       <span class="muted">${esc(file.name)}:${a.line}</span><span class="em" role="alert">${esc(this.editErr || '')}</span></span></div>`;
   }
-  async applyEdit(label) {
-    const ta = this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`); if (!ta) return;
+  // fl: from the floating editor (it stays open, its text the one applied)
+  async applyEdit(label, fl = false) {
+    const ta = fl ? this.flEl && this.flEl.querySelector('textarea.src') : this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`);
+    if (!ta) return;
     const text = ta.value; this.toast('parsing…');
-    const r = await SVA.edit(label, text), x = LIB.byLabel.get(label);
-    if (!r.ok) { this.editText = text; this.editErr = r.errors.join(' · '); this.editing = label; this.render(); this.toast(`not applied: ${r.errors[0]}`);
+    if (fl) this.flBusy = true;   // (the box not drawn meanwhile: a text that does not parse leaves the list without it for a moment)
+    let r; try { r = await SVA.edit(label, text); } finally { if (fl) this.flBusy = false; }
+    const x = LIB.byLabel.get(label);
+    if (!r.ok) {
+      if (fl) { if (this.fl && this.fl.label === label) { this.fl.text = text; this.fl.err = r.errors.join(' · '); } this.flRender(); }
+      else { this.editText = text; this.editErr = r.errors.join(' · '); this.editing = label; this.render(); }
+      this.toast(`not applied: ${r.errors[0]}`);
       return; }
     if (x) x.file.edited = true;
-    this.editing = null; this.editText = this.editErr = null; this.render();
+    if (fl) { if (this.fl && this.fl.label === label) this.fl.text = this.fl.err = null; } else { this.editing = null; this.editText = this.editErr = null; }
+    this.render();
     const bs = this.bindings.filter(b => b.assert === label);
     await this.queue;
     this.toast(bs.length ? `${label}: ${bs.map(b => outcome(b) ? plainCounts(outcome(b)) : b.state).join(' · ')}` : `${label}: applied (not bound)`);
@@ -1710,19 +1836,107 @@ class Panel {
       const r = await SVA.reload(name);
       if (!r.changed) { this.toast(`${name}: no change on the disk`); return; }
       const f = active().find(x => x.name === name); if (f) f.edited = false;
+      const fx = this.fl && LIB.byLabel.get(this.fl.label);
+      if (fx && fx.file.name === name) { this.fl.text = this.fl.err = null; this.flRender(); }
       await this.queue; this.toast(`${name}: read again${r.picked && r.picked !== name ? ` (from ${r.picked})` : ''}, parsed and evaluated`);
     } catch (e) { if (e.name !== 'AbortError') this.toast(`${name}: ${e.message}`); }
+  }
+  // the binding whose rows on the waves `row` is one of (its ⚑ group, attempts, steps, its signals again), or null
+  bindingOfRow(row) {
+    if (!row) return null;
+    return this.bindings.find(b => { const d = b.draw; return d && (d.g === row || d.lane === row || (d.steps || []).includes(row) ||
+      (d.cp && [...d.cp.values()].includes(row))); }) || null;
+  }
+  // the floating editor of one assertion (the right button on its rows on the waves: Edit the assertion…; ⧉ in the list's
+  // editor): its statement, Apply (ctrl+Enter) with the box kept open to try again, Revert, ⟳ its file; its bindings with
+  // their results, Evaluate, Bind…; dragged by its head, Esc or ✕ closes it. The list shows the same at once
+  floatEdit(label, at) {
+    if (!LIB.byLabel.has(label)) { this.toast(`no assertion '${label}' is loaded`); return null; }
+    let el = this.flEl;
+    if (!el || !el.isConnected) {
+      el = this.flEl = document.createElement('div'); el.className = 'sva svfl'; el.setAttribute('role', 'dialog');
+      this.v.root.appendChild(el);
+      el.addEventListener('click', e => {
+        const b = e.target.closest('button[data-sv]'), a = b && b.dataset.sv;
+        if (a === 'flclose' || a === 'noedit') { this.floatClose(); return; }
+        if (a === 'fllist') { this.open = true; this.render(); const li = this.el.querySelector(`li[data-a="${CSS.escape(this.fl.label)}"]`);
+          if (li) { li.scrollIntoView({ block: 'nearest' }); li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 900); } return; }
+        if (a === 'apply') { this.applyEdit(this.fl.label, true); return; }
+        if (a === 'revert' || a === 'del') this.fl.text = this.fl.err = null;
+        this.click(e);
+        if (a === 'del') this.floatClose();
+      });
+      el.addEventListener('input', e => { if (e.target.matches && e.target.matches('textarea.src') && this.fl) this.fl.text = e.target.value; });
+      el.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.closest('textarea.src')) { e.preventDefault(); this.applyEdit(this.fl.label, true); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.floatClose(); }
+        e.stopPropagation();   // (the viewer's keys stay out of the box)
+      });
+      el.addEventListener('pointerdown', e => {   // its head drags it
+        if (!e.target.closest('.flh') || e.target.closest('button')) return;
+        e.preventDefault(); const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+        const mv = ev => this.floatAt(ev.clientX - dx, ev.clientY - dy);
+        const up = () => { G.removeEventListener('pointermove', mv); G.removeEventListener('pointerup', up); };
+        G.addEventListener('pointermove', mv); G.addEventListener('pointerup', up);
+      });
+    }
+    const same = this.fl && this.fl.label === label;
+    if (!same) this.fl = { label, text: null, err: null };
+    this.flRender();
+    if (at) this.floatAt(at[0] + 12, at[1] - 20);
+    else if (!same || !el.style.left) { const r = this.v.root.getBoundingClientRect();
+      this.floatAt(Math.max(r.left, r.right - el.offsetWidth - 24), Math.max(8, r.top + 60)); }
+    const ta = el.querySelector('textarea.src'); if (ta) ta.focus({ preventScroll: true });
+    return el;
+  }
+  floatAt(x, y) {   // kept on the screen, its head at least
+    const el = this.flEl; if (!el) return;
+    const w = el.offsetWidth || 400, W = G.innerWidth || 1000, H = G.innerHeight || 800;
+    el.style.left = Math.round(Math.min(Math.max(4, x), Math.max(4, W - w - 4))) + 'px';
+    el.style.top = Math.round(Math.min(Math.max(4, y), Math.max(4, H - 40))) + 'px';
+  }
+  floatClose() { if (this.flEl) this.flEl.remove(); this.flEl = null; this.fl = null; if (this.pick && this.pickFl) this.pick = null; this.pickFl = false; }
+  flRender() {
+    const el = this.flEl, fl = this.fl; if (!el || !fl || this.flBusy) return;
+    const x = LIB.byLabel.get(fl.label);
+    if (!x) { el.innerHTML = `<div class="flh"><b>⚑ ${esc(fl.label)}</b><button type="button" class="ic" data-sv="flclose" ` +
+      'aria-label="close">✕</button></div>' +
+      `<p class="muted">${esc(fl.label)} is not loaded any more</p>`; return; }
+    const { a, file } = x, ta = el.querySelector('textarea.src'), sel = ta && G.document.activeElement === ta ? [ta.selectionStart, ta.selectionEnd] : null;
+    const inside = el.contains(G.document.activeElement);   // the focus stays in the box (Esc, ctrl+Enter) when what had it is drawn again
+    const st = fl.text != null ? fl.text : (SVA.statement(a.label) || {}).text || '', bs = this.bindings.filter(b => b.assert === a.label);
+    el.setAttribute('aria-label', `edit ${a.label}`);
+    el.innerHTML = `<div class="flh" title="drag to move it"><span class="grip" aria-hidden="true">⠿</span><b>⚑ ${esc(a.label)}</b><span
+      class="ak k-${a.kind}">${a.kind}</span><span class="muted">${esc(file.name)}:${a.line}</span><button type="button" data-sv="fllist"
+        title="Its line in the Assertions panel">In the list</button><button type="button" class="ic" data-sv="flclose" aria-label="close"
+          title="Close (Esc)">✕</button></div>
+      <div class="flb" data-a="${esc(a.label)}"><div class="sve"><textarea class="src" spellcheck="false"
+        rows="${Math.min(16, Math.max(3, st.split('\n').length + 1))}" aria-label="the statement of ${esc(a.label)}">${esc(st)}</textarea>
+      <span class="eb"><button type="button" data-sv="apply"
+        title="Parse it and evaluate its bindings again (ctrl+Enter); the box stays open; kept in this browser">Apply</button>${file.shadows ?
+          `<button type="button" data-sv="revert" title="Forget this browser's ${esc(file.name)}: the page's file comes back">Revert to the page's</button>` :
+          ''}<button type="button" class="ic" data-sv="reload" aria-label="read ${esc(file.name)} again"
+            title="Read ${esc(file.name)} again from where it was loaded">⟳</button><span class="em" role="alert">${esc(fl.err || '')}</span></span></div>
+      <div class="flbs">${bs.map(b => `<div class="fb1" data-b="${this.bindings.indexOf(b)}" aria-live="polite">${this.bindHTML(b)}</div>`).join('') ||
+        '<span class="muted">not bound</span>'}<span class="ab"><button type="button" data-sv="bind"
+          title="Bind to an instance: the modules where all its signals are">Bind…</button></span></div>
+      ${this.pick === a.label && this.pickFl ? this.pickHTML(a) : ''}</div>`;
+    const nt = el.querySelector('textarea.src');
+    if (sel && nt) { nt.focus({ preventScroll: true }); nt.setSelectionRange(sel[0], sel[1]); }
+    else if (inside && nt && !el.contains(G.document.activeElement)) nt.focus({ preventScroll: true });
   }
   // one binding's line in place (status, counts); the whole list only when it changes
   renderB(b) {
     if (this.qOn() && this.Q.needs) { this.qLater(); return; }   // a search by states: what it lists may change with them
-    const el = this.el.querySelector(`ol.asv [data-b="${this.bindings.indexOf(b)}"]`);
+    const k = this.bindings.indexOf(b), el = this.el.querySelector(`ol.asv [data-b="${k}"]`), fb = this.flEl && this.flEl.querySelector(`[data-b="${k}"]`);
+    if (fb) fb.innerHTML = this.bindHTML(b);
     if (el) el.innerHTML = this.bindHTML(b); else this.render();
   }
   render() {
     const all = this.qAll(), el = this.el;
     const orphans = this.bindings.filter(b => !LIB.byLabel.has(b.assert) && this.qOk(b));
     el.hidden = !all.length && !LIB.notes.length && !this.bindings.some(b => !LIB.byLabel.has(b.assert));
+    this.flRender();
     if (el.hidden) { el.innerHTML = ''; return; }
     const ol = el.querySelector('ol.asv'), keep = ol ? { top: ol.scrollTop, h: ol.style.height } : null, qf = this.qFocus();
     const list = this.qOn() ? all.filter(x => this.qShown(x.a)) : all, num = new Map(all.map((x, k) => [x, k + 1]));   // (numbered as in the whole list)
@@ -1732,7 +1946,7 @@ class Panel {
     const line = (x) => {
       const { a, file } = x, k = num.get(x) - 1, sigs = a.signals.map(s => s.name);
       const bs = this.bindings.filter(b => b.assert === a.label && this.qOk(b));
-      const pick = this.pick === a.label ? this.pickHTML(a) : '';
+      const pick = this.pick === a.label && !this.pickFl ? this.pickHTML(a) : '';
       return `<li data-a="${esc(a.label)}" draggable="true"
         title="click: go to it on the waves (again: its next attempt) · drag onto a module in the names column to bind it">
         <span class="an"><span class="grip" aria-hidden="true">⠿</span>${k + 1}</span>
@@ -1752,7 +1966,8 @@ class Panel {
             title="Edit this assertion here: Apply parses it and evaluates its bindings again (ctrl+Enter)"${a.at ? '' : ' disabled'}>✎</button><button
               type="button" class="ic" data-sv="reload" aria-label="read ${esc(file.name)} again"
                 title="Read ${esc(file.name)}` +
-                  ` from the disk again: its assertions are parsed and evaluated again (the first time: pick the file)` +
+                  ` again from where it was loaded (Load file…): its assertions are parsed and evaluated again` +
+                  `${SVA.source(file.name) ? '' : ' (not loaded from a file in this page yet: pick it once)'}` +
                   `">⟳</button><button type="button" class="ic" data-sv="del"` +
                   ` aria-label="remove ${esc(a.label)}"` +
                   ` title="Remove this assertion from the list (and its bindings)">✕</button></span>
@@ -1953,10 +2168,10 @@ class Panel {
       if (b) this.reveal(b); else this.toast(`${li.dataset.a} is not bound: drag it onto a module, or Bind…`);
       return;
     }
-    const act = btn.dataset.sv, li = btn.closest('li[data-a]'), label = li && li.dataset.a, bl = btn.closest('[data-b]'), b = bl &&
+    const act = btn.dataset.sv, li = btn.closest('[data-a]'), label = li && li.dataset.a, bl = btn.closest('[data-b]'), b = bl &&
       this.bindings[+bl.dataset.b];
     if (act === 'tw') { this.open = !this.open; this.render(); }
-    else if (act === 'bind') { this.pick = this.pick === label ? null : label; this.render(); }
+    else if (act === 'bind') { this.pick = this.pick === label ? null : label; this.pickFl = !!btn.closest('.svfl'); this.render(); }
     else if (act === 'nopick') { this.pick = null; this.render(); }
     else if (act === 'nowhy') this.unselect();
     else if (act === 'wt') this.v.setCursor(+btn.dataset.t);
@@ -1969,6 +2184,9 @@ class Panel {
     }
     else if (act === 'edit') { this.editing = this.editing === label ? null : label; this.editText = this.editErr = null; this.render();
       if (this.editing) this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`)?.focus(); }
+    else if (act === 'float') { const t = this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`), text = t ? t.value : null;
+      this.editing = null; this.editText = this.editErr = null; this.render(); this.floatEdit(label); if (this.fl && text != null) { this.fl.text = text;
+        this.flRender(); } }
     else if (act === 'noedit') { this.editing = null; this.editText = this.editErr = null; this.render(); }
     else if (act === 'apply') this.applyEdit(label);
     else if (act === 'revert') { const x = LIB.byLabel.get(label); this.editing = null; this.editText = this.editErr = null;
@@ -2856,6 +3074,7 @@ function svgRows(M, S) {
   if (!k.wait && G.WAVELENS_SVA_WASM && k.binds.some(b => !b.results)) k.wait = svgEvaluate(M, S, k);
   if (!k.xwait && G.WAVELENS_SVA_WASM && k.exprs.length) k.xwait = svgExprs(M, S, k);
   const ok = drawnOf(S, filterOf(S.svaFilter)), I = scopeInfo(M), at = new Map([[-1, exprRows(k.xst, k.exprs.filter(e => e.res && !e.res.err))]]);
+  const lanes = [];   // the focused attempts' $past, $stable …: their lanes (as the viewer's selected one)
   for (const b of k.binds) {
     const o = outcome(b), map = o && rowsOf(M, o), x = LIB.byLabel.get(b.assert);
     if (!o || (ok && !ok(queryItem(x && x.a, b, map))) || (o.missing || []).length) continue;
@@ -2863,10 +3082,11 @@ function svgRows(M, S) {
     const copies = S.svaSignals === true ? [...new Set(Object.values(map))] : [];
     const rows = assertionRows(b.draw, b.results, { S, label: b.assert, scope: b.scope, copies, map, view: null, focus: focusOf(o),
       base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 }, sel: () => -1, pick: () => {} });
+    lanes.push(...b.draw.lanesOf(focusOf(o)));
     if (!at.has(key)) at.set(key, []);
     at.get(key).push(...rows);
   }
-  return [Object.assign(g => at.get(g ? g.id : -1) || [], { marks: () => exprMarks(k.exprs),
+  return [Object.assign(g => at.get(g ? g.id : -1) || [], { marks: () => exprMarks(k.exprs), lanes: () => lanes,
     keeps: () => (k.exprs.some(e => e.gap) ? exprKeeps(k.exprs) : null) })];
 }
 // the expressions of a figure, valued in the page (the files of its "sva" for package constants), then drawn again

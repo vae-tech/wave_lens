@@ -24,7 +24,9 @@ const WaveSVG = {
       timeMarks = extra.flatMap(f => (f.marks ? f.marks() : []));   // a plugin's times, as view.extraMarks
       keeps = extra.map(f => (f.keeps ? f.keeps() : null)).find(Boolean) || null;   // the stretches it keeps, as view.extraKeep
       const all = withExtra(sorted, extra, M, opts.owner || M);
-      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks);
+      // a plugin's lines over its rows, as view.extraLanes
+      const lanes = extra.flatMap(f => (f.lanes ? f.lanes() : [])).map(x => ({ signal: x.signal, row: x.row, lane: x.lane, lift: true }));
+      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks.concat(lanes));
     }
     const hl = C.hl;
     // gaps (opts.cuts, a plugin's stretches, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a

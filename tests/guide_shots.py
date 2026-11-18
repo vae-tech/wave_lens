@@ -632,6 +632,22 @@ def sva(S, ex, build):
     S.quiet(page)
     S.save('sva-edit', li)
     li.locator('button[data-sv=noedit]').click()
+    # what $stable reads: apb_addr_stable's first attempt selected, the rings one cycle back on the step and on PADDR, PWRITE
+    page.evaluate("(async () => { WaveLens.configure({svaShow: ['apb_addr_stable'], svaSignals: true}); await SVA.ready(); })()")
+    page.evaluate(f"""(() => {{ const p = {p0}; p.open = false; p.render(); const b = p.bindings.find(b => b.assert === 'apb_addr_stable');
+        p.select(b, 0); }})()""")
+    shots.settle(page)
+    S.quiet(page)
+    S.save('sva-past', v, upto=v.locator('.notes'))
+    # the floating editor (Edit the assertion… on its rows) over the waves of apb_demo_no_wait, its failure selected
+    page.evaluate("(async () => { WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: true}); await SVA.ready(); })()")
+    page.evaluate(f"""(() => {{ const p = {p0}; const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait');
+        p.select(b, b.results.assertions[0].attempts.findIndex(a => a.result === 'fail')); p.floatEdit('apb_demo_no_wait');
+        const r = p.v.root.getBoundingClientRect(); p.floatAt(r.left + 420, r.top + 250); }})()""")
+    shots.settle(page)
+    S.quiet(page)
+    S.save('sva-float', v, upto=v.locator('.notes'))
+    page.evaluate(f"(() => {{ const p = {p0}; p.floatClose(); p.unselect(); p.open = true; p.render(); }})()"); shots.settle(page)
     # Bind…: the instances where its signals are
     li = v.locator('.sva li[data-a="apb_setup_then_access"]')
     li.locator('button[data-sv=bind]').click(); shots.settle(page)
