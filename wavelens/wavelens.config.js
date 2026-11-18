@@ -64,7 +64,8 @@ window.WAVELENS_CONFIG = {
   showWidth: true,              // a bus's width after its name ([7:0], a field's [msb:lsb]; a click on it: the bus bit by bit); false: none
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
   svaSignals: 'view',           // assertion groups (sva.js): the bound signals again under the steps: 'view' (viewers), true (also static SVGs), false
-  svaShow: null,                // assertion groups drawn: null = all, or labels / * patterns ['apb_*']
+  svaShow: null,                // assertion groups drawn: null = all, or labels / * patterns ['apb_*'], or a search 'apb_* !is:cover'
+  svaFilter: null,              // the Assertions panel's search at start: 'name* @signal in:scope is:fail', or {query, mask} (mask: the waves too)
   gaps: false,                  // the pictures and WaveDrom saved (menu of the right button; static SVGs too): stretches where no signal but a clock
                                 //   changes left out, a break "|" in their place (the viewer's menu turns it on and off)
   gapIdle: 16,                  //   a gap where nothing changes this long: clock cycles (16) or a time ('2us')

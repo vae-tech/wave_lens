@@ -16,21 +16,32 @@ const fake = (name, over = {}) => new Proxy(function () {}, {
 const disposable = () => ({ dispose() {} });
 
 // o: ext (the path of extension.js), dir (the scratch directory: joinPath, the storages), extensionPath (default dir),
-// config (wavelens.* settings over { keysToVSCode: [] }), window / workspace / languages (members over the defaults),
-// vscode (more top-level names: Range, Diagnostic, ProgressLocation …), workspaceState (a Map kept, default none kept)
+// config (wavelens.* settings of the user over { keysToVSCode: [] }), workspaceConfig / folderConfig (the workspace's and a
+// workspace folder's: they win in that order, as VS Code reads them), window / workspace / languages (members over the
+// defaults), vscode (more top-level names: Range, Diagnostic, ProgressLocation …), workspaceState (a Map kept, default none kept)
 function host(o) {
   let provider = null;
   const Uri = { file: p => ({ fsPath: p, toString: () => 'file://' + p, scheme: 'file' }), parse: s => ({ fsPath: s.replace('file://', '') }),
     joinPath: () => ({ fsPath: o.dir }) };
-  const settings = Object.assign({ keysToVSCode: [] }, o.config), updates = [];
+  // the settings at their three levels (review 2026-11-18 T-04): 1 the user's, 2 the workspace's, 3 a workspace folder's; read
+  // the nearest, inspected each, written to the target asked (none: the user's), the change told to onDidChangeConfiguration
+  const levels = { 1: Object.assign({ keysToVSCode: [] }, o.config), 2: Object.assign({}, o.workspaceConfig), 3: Object.assign({}, o.folderConfig) };
+  const settings = levels[1], updates = [], changed = [];
+  const value = k => [3, 2, 1].map(t => levels[t][k]).find(v => v !== undefined);
+  const config = () => ({ get: value,
+    inspect: k => ({ globalValue: levels[1][k], workspaceValue: levels[2][k], workspaceFolderValue: levels[3][k] }),
+    update: async (k, v, target) => {
+      const t = target === 2 || target === 3 ? target : 1;
+      if (o.updateThrows) throw new Error(o.updateThrows);
+      updates.push([k, v, target]); if (v === undefined) delete levels[t][k]; else levels[t][k] = v;
+      for (const f of changed) f({ affectsConfiguration: s => s === 'wavelens' || s === `wavelens.${k}` });
+    } });
   const vscode = fake('vscode', Object.assign({ Uri,
     window: fake('window', Object.assign({ registerCustomEditorProvider: (id, p) => { provider = p; return disposable(); },
       createOutputChannel: () => fake('out') }, o.window)),
-    // the settings: read, and written as the user's (update: undefined removes; the target kept in h.updates)
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
-    workspace: fake('workspace', Object.assign({ getConfiguration: () => ({ get: k => settings[k],
-      inspect: k => ({ [updates.some(u => u[0] === k && u[2] === 2) ? 'workspaceValue' : 'globalValue']: settings[k] }),
-      update: async (k, v, target) => { updates.push([k, v, target]); if (v === undefined) delete settings[k]; else settings[k] = v; } }) }, o.workspace)) },
+    workspace: fake('workspace', Object.assign({ getConfiguration: config,
+      onDidChangeConfiguration: f => { changed.push(f); return disposable(); } }, o.workspace)) },
   o.languages ? { languages: fake('languages', o.languages) } : {}, o.vscode));
   const load = Module._load;
   Module._load = (r, ...a) => (r === 'vscode' ? vscode : load(r, ...a));
@@ -46,13 +57,14 @@ function host(o) {
     const said = [], on = {};
     const webview = { options: {}, html: '', cspSource: 'x', asWebviewUri: u => u, postMessage: async m => { said.push(m); return true; },
       onDidReceiveMessage: f => { on.message = f; return disposable(); } };
-    await provider.resolveCustomEditor({ uri: Uri.file(file) }, { webview, onDidDispose: disposable, onDidChangeViewState: disposable,
-      reveal() {}, active: true, title: '' });
-    return { said, send: m => on.message(m), html: () => webview.html, reply: id => said.find(x => x.id === id),
+    await provider.resolveCustomEditor({ uri: Uri.file(file) }, { webview, onDidDispose: f => { on.dispose = f; return disposable(); },
+      onDidChangeViewState: disposable, reveal() {}, active: true, title: '' });
+    // close(): the tab closed by the user (the panel's onDidDispose)
+    return { said, send: m => on.message(m), html: () => webview.html, reply: id => said.find(x => x.id === id), close: () => on.dispose && on.dispose(),
       // the host's data in the page (<script id="wavelens-host">)
       host: () => JSON.parse(/id="wavelens-host">(.*?)<\/script>/s.exec(webview.html)[1].replace(/\\u003c/g, '<')) };
   };
-  return { vscode, ctx, Uri, tab, api, updates };
+  return { vscode, ctx, Uri, tab, api, updates, settings, levels };
 }
 
 // the test's body: its result printed on one line RESULT{…} (read by the Python side), a throw: the stack, exit 1

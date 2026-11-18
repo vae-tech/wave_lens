@@ -159,11 +159,15 @@ pub struct Options {
     /// List the passing attempts of an assert / assume (default); false: counted only, the failures and the attempts
     /// without verdict listed (a large dump: its passes are too many to list).
     pub passes: bool,
+    /// List at most this many attempts of each assertion (the failures first, then the others, the first by start of
+    /// each); the others counted only, `listed` saying how many there were and the failures found first and last (sva
+    /// eval --max-attempts: a large dump's failures on every cycle). None: all.
+    pub max_listed: Option<usize>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { vacuous: false, lane: true, x: XMode::Fail, max_threads: 256, cover_traces: 100, from: 0, to: None, merge: true, passes: true }
+        Options { vacuous: false, lane: true, x: XMode::Fail, max_threads: 256, cover_traces: 100, from: 0, to: None, merge: true, passes: true, max_listed: None }
     }
 }
 
@@ -309,6 +313,10 @@ pub struct Listed {
     /// The longest decided attempt of all, `[cycles, start]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub longest: Option<[usize; 2]>,
+    /// The failure found first of all (the earliest `failed_at`, then start): a cut list may not hold it (an early
+    /// attempt that fails late is listed before it; `--max-attempts 0` lists none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_fail: Option<Attempt>,
     /// The failure found last of all (the latest `failed_at`, then start).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_fail: Option<Attempt>,
@@ -316,8 +324,13 @@ pub struct Listed {
 
 impl Outcome {
     /// The failing attempt found first: the earliest `failed_at`, then the earliest start (as the report's
-    /// `first_fail` and JUnit; not the first attempt by start, which may fail later: bughunt B-05).
+    /// `first_fail` and JUnit; not the first attempt by start, which may fail later: bughunt B-05); of a cut list, the
+    /// one `listed` carries.
     pub fn first_fail(&self) -> Option<&Attempt> {
+        // a cut list: the one of all the attempts (review 2026-11-18 B-10)
+        if let Some(f) = self.listed.as_ref().and_then(|l| l.first_fail.as_ref()) {
+            return Some(f);
+        }
         self.attempts.iter().filter(|a| a.result == Status::Fail).min_by_key(|a| (a.failed_at.unwrap_or(a.end), a.start))
     }
 }

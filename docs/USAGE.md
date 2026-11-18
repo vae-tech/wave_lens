@@ -13,8 +13,8 @@ Contents: [Use cases](#use-cases) · [Assertions (SVA)](#assertions-sva) · [The
 
 ### A dump straight in the browser
 
-Open `wavelens/viewer.html` from the repository (`file://`, no build) and drop a VCD on it, or **Open…** in the **dump**
-group of its bar (the last line; every viewer has it, a built page too). The VCD is read in the page: its signals by
+Open `wavelens/viewer.html` from the repository (`file://`, no build) and drop a VCD on it, or **File ▾ → Open dump…**
+(`gO`; every viewer has it, a built page too). The VCD is read in the page: its signals by
 scope (struct / union / interface scopes marked), exact transitions; a big one is cut to the `dumpBudget` setting (3 M
 value changes: the scope levels nearest the top first; the toast says how many signals). **⟳** reads the file again
 after a new simulation and keeps the view (window, cursor, folding, highlight, bookmarks): in Chromium the file is
@@ -444,7 +444,8 @@ add theirs (`WaveLens.registerDefaults`).
 | `findCase`, `findWord`, `findRegex` | false | starting state of **Aa** (match case), **Full** (whole name; `a.b`: the end of the full path), **.\*** (a regular expression) |
 | `bookmarkLeft` | 0.2 | going to a bookmark (`1`–`9`, `]b [b`, **Markers…**, a number in its list, the command's `go`): its time this far from the left of the waves (0 … 0.9; 0.5: the middle; not a number: 0.2) |
 | `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
-| `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns) |
+| `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns; or a search of the assertions as one text: `"apb_* !is:cover"`) |
+| `svaFilter` | none | the Assertions panel's search at start (§ Assertions): a query (`"@PREADY is:fail"`) or `{"query": …, "mask": true}` (the waves too; a static SVG follows a mask) |
 
 ### Themes
 
@@ -584,6 +585,31 @@ start folded; `"svaShow": ["apb_*"]` limits which are drawn (the panel says `19 
 its totals stay over every binding). A `"render": "svg"` view draws the same rows with every
 attempt's arrows and a legend of the steps, and the first failure (else the first attempt) of each assertion on its
 signals with its start and end flags.
+
+**Finding assertions.** The field **⌕** in the panel's head (`/` with the focus in the panel; Esc empties it) narrows the
+list, its **Table** and its **Failures** to the assertions that match, and says how many (`3 of 14 match`, in the totals
+too). Words apart by blanks all hold, `a,b` in a word is either, `!word` is not; `*` and `?` mask the whole text, a word
+without them is a part of it; any case:
+
+| Word | Matches |
+|---|---|
+| `apb_*`, `req,ack`, `stable` | the label (and `label@instance`) |
+| `@PREADY`, `@*.u_apb.p*` | a signal of it: its name as the source writes it, or the full path it was bound to (the dump is not read: a large dump too) |
+| `in:*.u_dma*` | the instance it is bound to |
+| `is:fail` `is:pass` `is:vacuous` | its results: a failure; no failure and a pass (a cover: a match); neither |
+| `is:cover` `is:assert` `is:assume` | its kind |
+| `is:unbound` `is:error` `is:capped` `is:running` | bound nowhere; cannot bind or its evaluation failed; attempts capped; being evaluated |
+
+An assertion bound to several instances stays one line with the bindings that match under it. A word not understood
+(`is:fial`, a bare `@`) is said under the field and filters nothing. While results are missing (a dump being evaluated, `sva
+eval` over a large dump) a search by them says `still evaluating`, not an empty list. **Mask** beside the field draws only
+the matches on the waves (over `svaShow`; the panel says `1 shown on the waves`); `]a` / `[a` (and Enter in the field,
+shift+Enter back) walk the matches on the waves with or without it. The right button on a signal, **Assertions on this
+signal**, opens the panel with `@` and its full path. The search is kept in this browser and in the saved state
+(`"svaFilter": {"query": "@PREADY is:fail", "mask": true}`), set by the setting `svaFilter` at start and by the command
+`sva` (`{op: 'sva', filter: 'is:fail', mask: true}` answers the matches). `report.md` and `report.json` report every
+binding, whatever the search lists. `svaShow` takes the same words as one text (`"svaShow": "apb_* !is:cover"`); a list, or
+names apart by commas, keep their meaning (labels and `*` patterns).
 
 **Why.** With an attempt selected the panel shows **Why**: the assertion's booleans (its steps, an `if` condition,
 `disable iff`), each taken apart into its operands (`PSEL && PENABLE` → `PSEL`, `PENABLE`; `$rose(req)` → `req`), one
@@ -784,11 +810,11 @@ is in sight. Navigation follows Questa's wave window, the lists and the text vim
 | `b` | bookmark at the cursor (its label asked there) | `]b [b` | the next / previous bookmark |
 | `m` | marker at the cursor: its label asked (Enter) | `]m [m` | the next / previous marker |
 | `r` | the last state loaded, read again (Reload) | `R` | the dump read again from the disk, the view kept (⟳) |
-| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click (under the mouse pointer, on its left or above it where the window ends; the corner before the mouse has moved on the page), as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC gu`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
+| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click (under the mouse pointer, on its left or above it where the window ends; the corner before the mouse has moved on the page), as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC gu`, the compare `g=` `gb`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
 | `gM` `gB` | a marker, a bookmark at the cursor (as `m`, `b`) | `gd` `gc` | the Δ between markers on / off; clear every bookmark, arrow and marker of yours |
 | `gt` `gT` | the Modules panel, the state machines (as `t`, `T`) | `gs` `gL` `gr` | the state: Save, Load…, Reload |
 | `gO` `gR` `gC` | the dump: Open…, ⟳, Compare… | `gp` | Save page |
-| `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | B: compare A with the next (older) / previous run kept, over the same window |
+| `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | B: the next (older) / previous run kept picked (not compared: `g=`, Compare, compares it with A over the window in sight) |
 | `]w` `[w` | A: the next (older) / previous run kept shown here (now among them), the view kept; with no B the walk through the runs | | |
 | `yn` `yt` | copy the selected signal's name; the time of the cursor | `yl` | copy a link to here: the cursor and the selected signal ([§ A link to a moment](#a-link-to-a-moment)) |
 | `yi` `yI` | copy an image of the range (else the window): the rows on the screen (the highlighted ones); every row of the list | `zz` | zoom to the range, else to the two cursors |
@@ -802,16 +828,20 @@ is in sight. Navigation follows Questa's wave window, the lists and the text vim
 | shift+click a name | select every signal from the last one clicked to it (selected, nothing dimmed; the tint inside bus values too) | alt+drag | a box: its time the range, the signals it touches selected, then the menu |
 | `]f [f` | next / previous assertion failure (`sva.js`) | click a bar or circle | select an assertion attempt |
 | `]x [x` | next / previous match of the expression you are on | `]X [X` | next / previous expression |
-| `]a [a` | next / previous assertion: its first failure, else its first pass | click a line of the assertions panel (again: its next attempt) | go to an assertion |
+| `]a [a` | next / previous assertion: its first failure, else its first pass (a search in the panel: of its matches) | click a line of the assertions panel (again: its next attempt) | go to an assertion |
+| `/` in the assertions panel | its search **⌕** (Esc empties it; Enter / shift+Enter: the next / previous match on the waves) | right button on a signal: **Assertions on this signal** | the panel's search by `@` its path |
 | `d` / `D`, `gb`, `g=` | a dump compared: the other run / both over each other (*Which run the waves show*); the red mask off / on; Compare (A and B over the window in sight) | `]d [d` | next / previous difference |
 | `]t [t` | next / previous bus transaction (`bus.js`) | `?` | the keys in a box |
-| ctrl+Z / ctrl+shift+Z, ctrl+Y | undo / redo (bookmarks, spans, groups, colours, hidden rows, sort, the expressions, the assertions' bindings …) | alt+`↑ ↓` | a row of your group up / down (shift: the group) |
+| ctrl+Z / ctrl+shift+Z, ctrl+Y | undo / redo (bookmarks, spans, groups, colours, hidden rows, sort, the expressions, the assertions' bindings …) | alt+`↑ ↓` | any row up / down: of your group in it, of the dump in its module (shift: the group, the module) |
 
 **The scroll bar.** Zoomed in, a thin bar at the foot of the waves in sight stands for all of the waves (with the gaps on the
 waves: the cut-out axis, as the window shows it), its thumb for the window. Drag the thumb and the window follows, its
 span kept; while it is held, the window's ends, rounded to its scale, stand over it (`65.0 ns … 85.0 ns`). A click on the
-track brings the window's middle there (and drags on from it); `l` goes back to the window before. All of the waves in the
-window: no bar. It stays in sight when the canvas goes on under the screen; the setting `scrollbar: false` takes it away.
+track (its lowest few pixels, lit under the pointer) brings the window's middle there (and drags on from it); above it the
+last row takes the clicks, the right button and the wheel as ever. The thumb is at least 18 px wide: zoomed in far, it is
+flush right only with the window at the end. `l` goes back to the window before. All of the waves in the window: no bar.
+It stays in sight when the canvas goes on under the screen (or under the viewer's own box going on under the screen); the
+setting `scrollbar: false` takes it away (`layout` with `scrollbar` for one viewer, kept in its state).
 
 **Bus widths and bits.** A bus has its width after its name, as declared: `PADDR [7:0]` (a field of a packed struct its
 place in the vector, `[15:13]`; a struct's row its whole value's; none on a bit, a real or a string; `"showWidth": false`
@@ -1096,21 +1126,26 @@ A renamed group says its new name at once wherever it shows: its row in the name
 with its rows) one place past the next row shown (a hidden one is not a place), **alt+shift+↑ / ↓** its module; the
 right button on such a name has **Move up / Move down / To the top / To the bottom** of its module in **Your groups ▸**. The toast says the
 place (`PENABLE: 6 of 14 in the top`). The state keeps it as `"order"` — a module's path (`""`: the top) and the names
-of its rows in your order; a row it does not name (a signal new in the dump) keeps its place —, in this browser too and
-in Save, one step to undo each. Another **Sort** (the button, `s`, the `sort` command with another `dir`) drops it, said
-in the toast (ctrl+Z brings it back); the prefixes typed keep it. The right button on any
+of its rows in your order, a second row of one name in a module (two `valid` of a WaveJSON group, a signal and a module
+`sub`) as `"valid#2"` (a state of 0.62 with a name twice reads the second so); a row it does not name (a signal new in the
+dump) keeps its place —, in this browser too and in Save, one step to undo each; the command `order` does the same from a
+script or an agent. Your order is of the sort it was made under: another **Sort** (the button, `s`, the `sort` command
+with another `dir`, which answers `orderDropped`), other prefixes, a state of another sort with no `"order"`, another
+`groupOrder` drop it, said in the toast; ctrl+Z, or that sort again, brings it back (this browser keeps it meanwhile, as
+it does not keep the sort). The right button on any
 name opens the same menu as on the waves for that row, at the cursor (text selected in the names: the browser's menu). Under the waves the **Markers** list has each marker's time, signal (empty: the top; ↥ ↧ over it or under it), label, colour and **pale**, the
 **Groups** list each group's name and colour (its signals get the colour). Both are kept in this browser and in a saved
 state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 
 **Save and Load.** **Save** downloads what you did in the viewer as `<title>.view.json`: the time window and the
 cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the
-bookmarks and arrows, your markers and groups, Only (the modules kept), the assertions (the files loaded or edited in the page, with their text,
-and the bindings) and the expressions. **Load…** reads it back into a viewer — after a reload, in another browser, or on other waves (what they lack is
+bookmarks and arrows, your markers and groups, your order of the rows (`"order"`), Only (the modules kept), the assertions (the files loaded or edited in
+the page, with their text, and the bindings), the expressions, a second dump compared (`"compare"`, the run shown `"compareShow"`) and the Runs
+panel's mode and window (`"runsMode"`, `"runsOver"`). **Load…** reads it back into a viewer — after a reload, in another browser, or on other waves (what they lack is
 left out and counted in the bar). The last file loaded stays: **Reload** in the bar, or `r`, reads it again with no dialog, after a dump opened in the viewer too and, where the browser
 keeps a file's handle (Chrome, Edge), in the next page (it may ask to read the file on the first click); Load… opens in its folder. A state says what is not there too (`"cursor2": null`, `"range": null`, the edge kind
 `"edge": {"kind": "any", "value": ""}`): loaded, it clears them; a key it leaves out keeps the viewer's. Its `"config"`
-(`style`, `maxHeight`, `toolsFolded`, `toolsHidden`, `toolsCompact`, `toolLayout`, `stripGroups`, `toolAt`, `cursorStrip`, `sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findMask`, `findCase`, `findWord`, `findRegex`, the gaps' and the cycles' keys) pastes into a
+(`style`, `maxHeight`, `toolsFolded`, `toolsHidden`, `toolsCompact`, `toolLayout`, `stripGroups`, `toolAt`, `cursorStrip`, `compareMask`, `scrollbar`, `sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findMask`, `findCase`, `findWord`, `findRegex`, the gaps' and the cycles' keys) pastes into a
 config file as it is; times are model units (ps).
 **Save page** downloads the page itself as `<page>.view.html` with your view in it: every viewer's state goes into the
 page's edits (the block `tools/viewedit.py` writes, a new revision), so whoever opens that one file — another browser,
@@ -1125,7 +1160,11 @@ of its text). `WaveLens.savePage()` / `WaveLens.pageText()` from a script.
 the RTL, another seed — as B: nothing is compared yet (the bar says `B: b.vcd ✕`). **Compare** in the bar's compare group
 (`g=`) compares it over **the window in sight** only; zoom or pan, and the compare stays the one of its window (the time
 outside it shaded; **Compare** shows in the bar, `the window moved since`) until Compare again — B is read once (in VS Code: `sva diff` on
-the host over that window), each Compare after it only compares. It goes over these waves, on the same time scale, signal by signal of the same path (else the same name under
+the host over that window, one at a time: a newer Compare or ✕ stops the one running; a large VCD's own FST is read, not its text), each Compare after it only compares. A compare
+that cannot be made again here — given whole by a saved view, an agent's `compare {result}`, the page's own — lights no
+Compare, and Compare says so; a saved view's compare of another A (a run shown then) is not drawn over these waves, and the
+dump read again drops a given one (said). A large dump read as it is needed (the VS Code tab): the rows compared are read
+exact over the window first (a row that cannot be: refused, said). It goes over these waves, on the same time scale, signal by signal of the same path (else the same name under
 the page's scope; one found by its short name only is said: *matched by name: tb.a.ready → tb.b.ready* in the toast, on
 **≠ N ✕** and in its tooltip): where its value differs, a red band on the row; the name gets **≠**, a signal it lacks is struck; the
 title line says how many differ and where the first one is; **]d / [d** step to the next / previous difference (of the
@@ -1216,10 +1255,11 @@ then PENABLE +10 ns`).
 
 **The runs kept of a dump (VS Code).** The dump of a run is gone when the simulator writes the next one over it; to compare the
 run of now with the ones before, keep them by hand: **Runs…** in the bar's File ▾ (`gu`, the command *WaveLens: The runs
-kept of this dump*, `$(history)` in the tab's title) opens the Runs panel, and **Keep this dump…** keeps the dump as it is on the
+kept of this dump*, `$(history)` in the tab's title) opens the Runs panel, and **Keep this dump…** (`k` in the list) keeps the dump as it is on the
 disk with a name (the dump's by default), tags (a comma between them) and a comment: as an FST (a VCD converted as `sva fst`
 does it, its `x.types.json` read; an FST copied) in `.wavelens-runs` beside the dump (`wavelens.runsDir`: another directory,
-relative to the workspace folder or absolute), listed in its `runs.json`. A directory keep made, or one named `.wavelens-runs`,
+relative to the workspace folder or absolute; `~` and `${userHome}` are your home, `${workspaceFolder}` the dump's workspace
+folder; a workspace folder's own value is the one in effect for its dumps), listed in its `runs.json`. A directory keep made, or one named `.wavelens-runs`,
 gets a `.gitignore` of `*` (git leaves it out); another one without a `.gitignore` (a folder of yours named by
 `wavelens.runsDir`) gets one of the runs' files only (`*.fst`, `*.part`, `runs.json*`), never more. The panel lists the dump of now first (the row **now**: its file, its time and size on the disk), then the runs of
 this dump (by its file name; a shared `wavelens.runsDir` holds others, counted in the panel's header), newest first. A row
@@ -1234,13 +1274,19 @@ the setting `wavelens.runsDir` with this directory — in the workspace's settin
 (relative to the folder when inside it; a workspace of several folders: the whole path), else in yours (the whole path)
 — so the dumps opened later keep their runs here too (the other tabs read their lists again); the ★ is lit while the setting names the directory, and a click on a lit ★ clears the setting (the runs kept stay
 where they are; `.wavelens-runs` beside each dump again; when that is another directory, B and the Δ numbers are dropped
-and the dump of now is shown: the runs listed are others).
+and the dump of now is shown: the runs listed are others). The directory moved under a tab some other way (another tab's ★,
+the setting edited): that tab does the same when it reads its list again — the run compared, the runs picked and the Δ
+numbers dropped, a run shown as A replaced by the dump of now, said; the host refuses a run's number asked of the directory
+before (never another run of the same number), and A, the run shown, stays its own file for Compare… meanwhile.
 Two rows have a role, a letter on the left of the row, lit where it is (each row has both, as buttons): **A**, the waves
 shown in the tab (now at first), and **B**, the run compared with A. **Choosing only picks**: a row picked as B or A has its
 letter in a dashed box, nothing is read or compared; **Compare** (`c` in the list, the panel's **Compare**, the bar's
 **Compare**, `g=`) does it — A's waves read first when A is a picked run (the view kept), then A and B compared over the
 window in sight. Zoom or pan afterwards and nothing happens: the compare on the waves stays the one of its window (the time
-outside it shaded), Compare is lit and shows in the bar (`the window moved since`) until it is pressed again, over the new window. Who is compared with whom is on the screen: the two
+outside it shaded), Compare is lit and shows in the bar (`the window moved since`) until it is pressed again, over the new
+window — lit by the window asked, not by the time B covers (a B that ends earlier is no "moved"). A picked row clicked on
+its `B` again is picked no more (a compare on the waves stays); a file picked and then a run (or a run, then a file): one B,
+the later; a compare that fails keeps what was picked. Who is compared with whom is on the screen: the two
 letters on the list, `A · name` and `B · name` on the time axis, both names in the status line (`A #3 golden ≠ B #1 golden:
 4 of 40 signals differ over …`).
 
@@ -1267,17 +1313,19 @@ letters on the list, `A · name` and `B · name` on the time axis, both names in
 - **Open** (the switch **Compare | Open** in the panel's tool line, `o` in the list): the mode to look through the runs one
   after another, without A and B. A row chosen (a click, Enter, its `A`) opens its waves in the tab, the view kept as `w`
   keeps it; nothing is compared — the B of before is dropped when the mode is entered, the B letters and the compare's tools
-  (over, Δ all, ⟳, no B) are away, the lit row is the run shown. ↑ ↓ Home End PgUp PgDn held down open only the row they
+  (over, Δ all, Compare, no B) are away, the lit row is the run shown. ↑ ↓ Home End PgUp PgDn held down open only the row they
   rest on (after 0.6 s: a run's waves are read); keys pressed on while a run is read light their row over the new waves
   and open it when they rest. The status line starts with `Open ·`. The mode is kept with the view (a saved state's
   `runsMode`: `open` or `compare`; the dump read again keeps it); `]r` `[r` (a B asked) are the Compare mode again, `]w` `[w`
   work in both. A file of Compare… is not the panel's B: it stays picked over each run opened, Compare compares it (the bar's ✕ ends it).
-- **Δ all** lists for every run how many signals differ from A in the window and the first difference (red: some,
+- **Δ all** (`a` in the list) lists for every run how many signals differ from A in the window and the first difference (red: some,
   `= equal`: none, `not in this window`: the run does not cover it; numbers of another window or another A than the one now
   are greyed with theirs; the dump read again keeps them); **Compare** compares A with B over the window as it is now.
 
 Your span chosen is followed by what it is (deleted: the waves in sight again, said), and kept in a saved state with the
-run compared (B, `compare.run`); the dump read again (⟳, a new simulation) keeps the panel and compares with B again; a run
+run compared (B, `compare.run`, and the A it was made of, `compare.a`: a saved compare of another A is not drawn over these
+waves, said); the dump read again (⟳, a new simulation) keeps the panel and B picked — not compared: Compare does it (a run
+picked as A stays picked too); a run
 kept meanwhile in a shell or by an agent is listed at once (`runs.json` watched); ✎ (`e`) changes a run's name, tags,
 comment; ✕ (Delete) removes it and its file (asked first; B: the compare goes too; A: the dump of now shown again). The
 runs are the same dump's runs: its signals by their paths, the same time (two runs of one test; a run of another length is
@@ -1285,7 +1333,8 @@ compared on the time both cover). **Test cases**: a run keeps its test cases —
 yours with a label when Keep this dump… keeps it (none: cocotb's `wavelens.marks.json` beside the dump) — listed on its row
 ("3 cases"). A span of yours whose name is a case of a run (its label without the `TC3 ` before it and the ` · PASS` after
 it, as cocotb's marks label their spans; the window's choice says "· a case") is compared with that case of the run,
-wherever it is in the run: B offset to it, over the shorter of the two (said), for a click, `]r [r` and Δ all (a run
+wherever it is in the run: B offset to it, over the shorter of the two (said), for the B picked (a click, `]r [r`) when
+Compare compares it and for Δ all (a run
 without that case: an error on its row); a run that has cases but not this one is compared over the window as it is (said). Two runs whose earlier cases took longer still compare case by case. In a browser
 there is no Runs panel: the runs are kept by `sva runs`.
 
@@ -1294,8 +1343,8 @@ there is no Runs panel: the runs are kept by `sva runs`.
 signal, **its times from 0**: its first sample (the range's start, on the edge the range snapped to) is 0. Its row says
 `slice 120 ns … 145 ns, from 0`, its name by default `tb.vcd 120 ns–145 ns` (✎ renames it), no test cases (`sva runs set
 RUN --cases FILE` gives it those inside its window, their times from 0). Two slices — of
-one dump (two bursts, two packets, two calls of a task) or of two runs — compared as two runs are (one A, the other B: `w`,
-a click, `]r`, Δ all) line up on their first samples, so a difference is a difference of behaviour, not of when it
+one dump (two bursts, two packets, two calls of a task) or of two runs — compared as two runs are (one picked as A, the
+other as B: `w`, a click, `]r`; then Compare; or Δ all) line up on their first samples, so a difference is a difference of behaviour, not of when it
 happened; `]w` walks through them in one window. A slice compared with the dump or a whole run is read at its place in
 it (B offset by the slice's start, said in the status: `B's 120 ns … 145 ns: a slice at its place`); so is a file of
 **Compare…** while a slice is A. While a slice is A the
@@ -1358,7 +1407,10 @@ new as gone pair by their order and are moved (the same failures at other times)
 one label) pairs by its order. A **cover** has no failures: its matches compare — one that matched in A and never in B is **lost** (a
 coverage regression: exit 1, a failure in the JUnit), one that never matched in A and does in B **found** (exit 0). A table of the
 assertions that changed and the covers lost or found, `--json` (`assertions [{name, scope, a, b, new, gone, moved, first_new, kind?,
-lost?, found?}]` — a cover's `a` / `b` carry `matches` —, `new`, `gone`, `moved`, `lost`, `found`; times in ps), `--junit` (a test case
+lost?, found?, compared_to?}]` — a cover's `a` / `b` carry `matches`, a cut side's `listed` —, `new`, `gone`, `moved`, `lost`,
+`found`, `partial`; times in ps). A **cut list** (`sva eval --max-attempts`, a large dump: fewer failures listed than
+`stats.fail`, the first by start) compares up to the last start it lists — the shorter list's —, said on a line of its own
+("B lists 3 of 21 failures …: compared up to the start 35 ns"); past it nothing counts as new or gone. `--junit` (a test case
 per assertion, a failure for new or moved ones and a lost cover; a gone one in its system-out). Exit 0: no failure new, gone or moved,
 no cover lost; 1: some; 2: an error (a dump given with `--results` is one). `wave_diff` takes `results_a`, `results_b`.
 **Undo and redo.** **ctrl+Z** (or **↶** in the bar's title line) takes back the last change of what you edit: bookmarks, arrows,
@@ -1707,10 +1759,12 @@ theme (`c3`…`c9`, `hl1`…`hl8`, `fg`, `acc`, …: it follows dark and light);
 | `expr_go` | `id? dir? n?` | the cursor to the next (`dir` 1) or previous (−1) match of an expression, round the ends, or to match `n`; answers `t`, `k` (which one), `n` (how many; 0: never true); in a page only |
 | `expr_matches` | `id? from? to? limit? offset?` | what the expressions found: without `id` everyone's numbers (`exprs`), with `id` also its stretches in the window (`matches: [[from, to], …]`, `total`, `next_offset`; `limit` default 100); in a page only |
 | `expr_markers` | `id? label? color? signal? limit? deltas? delete?` | a marker at the start of each match of expression `id` (default the one picked) in the window, at most `limit` (200), labelled `label` (default its label, else `ƒ` and its id) and a number, in `color` (default its own), each with its Δ to the next one of it, the Δ on (`deltas: false`: not turned on); its markers there were go first; `delete`: they go -> `{id, markers, more, from, to}`; in a page only (on a file: `markers` of the config, `{"on": {"expr": …}}`) |
+| `sva` | `filter? mask?` | the [search of the assertions](#assertions-sva): `filter` a query (`apb_* @PREADY in:*.u_dut is:fail`; `""` or `null`: none), `mask` the waves draw only what it finds (over `svaShow`); answers `filter`, `mask`, `errors` (terms not understood: nothing filtered by them) and, in a page, `count`, `matches` [{`assert`, `scope` (`null`: bound nowhere), `signals` {name: path}, `state` (`fail` `pass` `vacuous` `error` `running` `pending` `unbound`), `counts`}], `evaluating` (bindings a filter by results cannot judge yet), `drawn`; kept in the state as `svaFilter` |
 | `span` | `id? from? to? label? color? signals? delete?` | a coloured stretch of time across the rows (or the rows of `signals`) with its label: new (`from` and `to`; reversed: swapped; at one time: refused), or span `id` changed; `delete`: `id` or `"all"` |
-| `compare` | `result? dump? a? map? offset? off? show? mask?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`), `off`: none; `dump` (`a`: the page's dump, `map`, `offset`) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); answers `name`, `compared`, `differ`, `first`, `missing`; `show`: which run the waves show, `a`, `b` or `overlay` (*Which run the waves show*; alone it answers `show`, `name`; `b` and `overlay` need B's values: a result without `vcd` refuses); in the saved state (`compareShow`); `mask`: the red mask on or off (the setting `compareMask`; alone it answers `mask`) |
-| `group` | `name signals? add? remove? color? rename? delete? go? move? divider?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `divider: true`: no signals, a line with its name between your groups and through the waves, in the picture too (`— Handshake —`; with signals an error; Hide, Highlight and the groups' lists leave it out); `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
-| `layout` | `scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; `compact`: the bar's short form, `"auto"`, `true` or `false`; `bar`: its groups arranged, lines of their labels (`[["find", "cursor"], ["list"]]`; null: the default order); `stripGroups`: the groups in the strip over the time axis (`["find", "cursor"]`; `[]`: none; null: the default); `at`: groups placed, `{"marks": 0.5}` (0 left .. 1 right, `"left"`, `"center"`, `"right"`; null: back in the flow); `strip`, `stripAt`: 0.53's, the cursor and the edges in the strip or not, their place — this viewer's, the browser's arrangement stays; answers `scroll`, `height`, `tools`, `compact`, `bar`, `stripGroups`, `at`, `strip`, `stripAt` |
+| `compare` | `result? dump? a? map? offset? off? show? mask? from? to? go?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`; nothing picked is left over it), `off`: none, nothing picked (the bar's ✕); `dump` (`a`: the page's dump, `map`, `offset`; `from` `to`: over that window only) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); `go`: the bar's **Compare** (`g=`) in a live page — B picked, or the compare on the waves made again, over the window in sight (`from` `to`: the waves zoomed there first; what Compare says when it does not compare is the error); answers `name`, `compared`, `differ`, `first`, `missing` and `from`, `to`: the time compared (since 0.62 a compare is of a window: `differ 0` is of that window only); `show`: which run the waves show, `a`, `b` or `overlay` (*Which run the waves show*; alone it answers `show`, `name`; `b` and `overlay` need B's values: a result without `vcd` refuses); in the saved state (`compareShow`); `mask`: the red mask on or off (the setting `compareMask`; alone it answers `mask`; with `off` kept for the next compare) |
+| `group` | `name signals? add? remove? color? rename? delete? go? move? divider?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `divider: true`: no signals, a line with its name between your groups and through the waves, in the picture too (`— Handshake —`; with signals an error; Hide, Highlight and the groups' lists leave it out); `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number); `rename` of a group not there, or not a text: an error |
+| `order` | `signal? move? module? clear?` | your order of the dump's rows (alt+`↑ ↓` in the names, the state's `"order"`): `signal` (a signal or a module of the dump; a second row of one path `"top.sub#2"`) one place `up` / `down` past the next row shown, to the `top` / `bottom` of its module or to place n (1: the first); `module: true` moves the module it is in; without `move` it answers the place; `clear: true` all of your order, with `signal` its module's; answers `signal`, `module`, `at`, `of`, `moved`; a row of your groups, a copy or a bit: an error (`group … move` for yours); not on a config's view |
+| `layout` | `scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt? scrollbar?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; `compact`: the bar's short form, `"auto"`, `true` or `false`; `bar`: its groups arranged, lines of their labels (`[["find", "cursor"], ["list"]]`; null: the default order); `stripGroups`: the groups in the strip over the time axis (`["find", "cursor"]`; `[]`: none; null: the default); `at`: groups placed, `{"marks": 0.5}` (0 left .. 1 right, `"left"`, `"center"`, `"right"`; null: back in the flow); `strip`, `stripAt`: 0.53's, the cursor and the edges in the strip or not, their place; `scrollbar`: the scroll bar at the foot of the waves (the setting `scrollbar`; null: the page's own; kept in the state) — this viewer's, the browser's arrangement stays; answers `scroll`, `height`, `tools`, `compact`, `bar`, `stripGroups`, `at`, `strip`, `stripAt`, `scrollbar` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
 | `paint` | `signals? color? clear?` | a colour (trace, outline, name) for signals; `color: null` their own again; `clear`: every one off (a `color` that is none: an error, nothing cleared) |
 | `select` | `signal? signals?` | the selected signal (edges, new bookmarks, a measured range counted on it), or several; one folded away, hidden or out of Only is not selected (`select: null`) |
@@ -1730,7 +1784,7 @@ theme (`c3`…`c9`, `hl1`…`hl8`, `fg`, `acc`, …: it follows dark and light);
 | `bits` | `signals on?` | buses bit by bit, a row per bit under each (`on: false`: folded again); a bit is named by its path (`PADDR[2]`) in every command |
 | `cursor`, `cursor2`, `view`, `fit`, `range` | `t` / `t` / `from? to? at? span?` / — / `from? to? signal?` | the cursors and the window (within the waves: a time before them is their start, one after them their end; the window at least `minSpan` — a millionth of the waves, 10 ps at least —, at most the waves; on a file too, when its page is known), the measured range (cut to the waves; one wholly outside them, one whose ends are one time or that only touches them is an error; `from: null`: none) |
 | `goto` | `t? sel? view? bm?` | a moment, as a [link](#a-link-to-a-moment) says it: the section `view` shown and scrolled to, its bookmark `bm`, the cursor at `t` in the middle, the signal `sel` selected and in sight -> `{view, t, sel}`; in a page only (it scrolls) |
-| `sort`, `style`, `find`, `gaps` | `dir ignore?` / `name` / `query case? word? regex? highlight? open? mask?` / `on? idle? keep? signals? clock? aux? only? count? view? reset?` | the order of the names (another `dir` drops your order of the rows, the state's `order`), the edge style, the find field and its options (answers the rows `found`, the first 50, and their `count`; on a page's file, `tools/viewedit.py`, of the signals, modules and your groups only: `plugins` says the assertions' rows are not counted), the gaps of the picture, and with `view` of the waves (`on`, `only`, `view`: true or false; `idle`: clock cycles, more than 0, or a time, `keep` cycles or a time; `count`: `off`, `clock`, `edges`, `rise`, `fall` or `any`; `signals`, `aux`: names or `*` patterns; another value is an error, nothing changed; `reset`: the page's own; answers every gap setting, on the waves also `cut`: `gaps`, `kept`, `total`, the first 50 `parts`, `partsAll` when more; while expressions have `gap` it is on and `gapBy` lists them, `on` or `view` false or `reset` takes `gap` off them) |
+| `sort`, `style`, `find`, `gaps` | `dir ignore?` / `name` / `query case? word? regex? highlight? open? mask?` / `on? idle? keep? signals? clock? aux? only? count? view? reset?` | the order of the names (another `dir` or `ignore` drops your order of the rows, the state's `order`, and answers `orderDropped`: its modules), the edge style, the find field and its options (answers the rows `found`, the first 50, and their `count`; on a page's file, `tools/viewedit.py`, of the signals, modules and your groups only: `plugins` says the assertions' rows are not counted), the gaps of the picture, and with `view` of the waves (`on`, `only`, `view`: true or false; `idle`: clock cycles, more than 0, or a time, `keep` cycles or a time; `count`: `off`, `clock`, `edges`, `rise`, `fall` or `any`; `signals`, `aux`: names or `*` patterns; another value is an error, nothing changed; `reset`: the page's own; answers every gap setting, on the waves also `cut`: `gaps`, `kept`, `total`, the first 50 `parts`, `partsAll` when more; while expressions have `gap` it is on and `gapBy` lists them, `on` or `view` false or `reset` takes `gap` off them) |
 | `cycles` | `on? clock? zero? reset?` | the clock cycles under the time axis: on, the clock counted (a 1-bit signal), the time of cycle 0 (`null`: the first edge), `reset`: the page's; answers the settings, the clock and the cursor's cycle (in the page; `null` from a file) |
 | `edge`, `reset` | `dir? kind? value? signal?` / — | the cursor to the next / previous edge; what Esc does |
 | `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save); a state back (Load…): a key it has replaces this one's (`config` key by key; its `fold` is the folding), a key it does not have stays, `null` clears; a key of another kind (`hidden` not a list, `paint` not an object, a cursor not a number) is an error naming it and nothing of the state is applied; the signals of the page in display order (your groups first, as sorted, the hidden ones where they would be; a dump compared: `"≠"` or `"missing"` third; a bus shown bit by bit: its bits under it, `["PADDR[7]", 1, "bit"]`); the screen as PNG (base64), SVG or WaveDrom (`rows`: `screen`, `all`, `picked` or signals, at most 5000; `from` / `to`: by default the range, else the window — WaveDrom: the window —, `to` after `from` or an error) |
@@ -1763,18 +1817,19 @@ A page carries its edits per view (a JSON block next to its data, a new revision
 them when it is opened: what this browser keeps of a viewer (bookmarks, arrows, markers, spans, groups, colours, radix, analog and
 hidden rows, the buses bit by bit, expressions, edge style, gaps) once per revision — what you change afterwards stays yours until a newer revision replaces the
 parts it names; the rest (cursor, window, highlight, selection, folding, order, search) every time it is opened, as the
-page's own settings. The commands that need the waves' values or the screen (`edge`, `fit`, `picture`, `fsm`, `fsm_stats`, `fsm_go`, `fsm_panel`, `types`, `expr_go`, `expr_matches`) run only in the
-page. The smoke test checks that a page with these edits and the same commands run in it give the same state.
+page's own settings. The commands that need the waves' values or the screen (`edge`, `fit`, `picture`, `fsm`, `fsm_stats`, `fsm_go`, `fsm_panel`, `types`, `expr_go`, `expr_matches`, `expr_markers`, `goto`, `bus_list`) run only in the
+page; `sva` writes its search into the file, what it finds is the page's (its answer there: the query and its errors). The smoke test checks that a page with these edits and the same commands run in it give the same state.
 
 **A rebuilt page keeps your view: the config.** `--config x.config.json --view v` runs the commands on a view of a config instead of a
 page: `bookmark`, `arrow` and `span` on its `"bookmarks"`, `"arrows"`, `"spans"` (a bookmark's `"at"` stays until a `t` replaces it),
 `view` on its window (`"from"`, `"to"`), and the rest of its look — `group`, `paint`, `highlight`, `radix`, `analog`, `hide` / `show`,
 `duplicate`, `bits`, `marker`, `deltas`, `span`, `expr`, `gaps`, `cycles`, `style`, `layout` — on its `"state"`: a viewer's state the page
 opens with (`mkhtml.py` puts it into the page's edits, once per change of it, without a toast). Not what a session is: the cursors, the
-range, the selection, the find, Only, the FSM layer, the order. The whole list is checked first (a bad command writes nothing), the file
-written at once, its other keys and views as they were. `--from-page x.html` takes the view of a page made of the config — its edits:
-what `viewedit.py`, an agent or **Save page** wrote — into it: groups, colours, radix, analog, hidden rows, copies, bits, markers, the Δ,
-bookmarks, arrows, spans, expressions and the look (`--keys` some of them); a page of another dump is said, not refused. `make html` of
+range, the selection, the find, Only, the FSM layer, the sort and the command `order` (they need the page's rows). The whole list is checked
+first (a bad command writes nothing), the file written at once, its other keys and views as they were. `--from-page x.html` takes the view
+of a page made of the config — its edits: what `viewedit.py`, an agent or **Save page** wrote — into it: groups, colours, radix, analog,
+hidden rows, your order of the rows, copies, bits, markers, the Δ, bookmarks, arrows, spans, expressions and the look (the edge style,
+the height, the scroll bar, the gaps, the cycles; `--keys` some of them); a page of another dump is said, not refused. `make html` of
 the next run gives the same view.
 
 **Live.** A page connected to an agent's `tools/wavemcp.py` (below) takes its commands as they come: a bookmark the
@@ -1817,8 +1872,8 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_fsm` | an FSM's states in a dump (`tools/fsmstats.py`, the rule of the page's FSM panel): each state's `entries`, `first`, `time` held and `share`, `never` (the states not reached), `invalid` (x, z, a code without a label), `changes` by count; its table the dump's (an FST's), the types file or `enum` `{code: label}`; `from` / `to` |
 | `wave_runs` | the runs kept of a dump (`sva runs`, the VS Code Runs panel's, in `.wavelens-runs` beside it; `dir` another): `action` `list` (the default: `dir`, `runs` newest first with their `start`, `end`, `cases` in ns), `keep` (`name`, `tags`, `comment`, `cases`: a file, `"none"` or `[{name, from, to}]` in ns; none: cocotb's marks beside the dump), `set`, `rm` (`run`: a number or a name), `all` (the runs of every dump of the directory, not this one's only), `diff` (the dump against each run, or those of `run`, a list too, over `from` … `to`, `signals`, `scope`, `map`: per run `signals_differ`, `first`, the signals that differ, `limit`; `case` NAME: each run's test case of that name against the dump's, wherever it is in the run, `case.offset`; `against`: a run, a number or a name, is A instead of the dump, compared with the others, `run` `"now"` the dump as a B, the answer's `against` `{id, name, file}`); then `wave_diff` with `b` the run's FST for the details |
 | `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small dump at `out`, in the format its name says: `x.vcd` a VCD (`sva vcd --from --to --signals`; a long list: `--signals-from FILE`, one a line), `x.fst` an FST (`sva fst`, the same keys), another name refused before anything is written; `zero`: its times from 0 (`--zero`: a page or a report needs no offset); the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to`; `signals` whole ones, as for `wave_diff` and `wave_runs` `diff` (the CLI cuts and compares a bus whole: a bit-select, `PADDR[3]`, is an error that names the bus) |
-| `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, expressions (their list, marks on the waves, the cursor on a match), groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): the commands on a view of a `mkhtml.py` config, so a rebuild keeps them: `bookmark`, `arrow`, `span` on its own keys (a bookmark's `"at"` stays until a `t` replaces it), `view` its window, the rest of its look (`group`, `radix`, `marker`, `deltas`, `hide`, `paint`, `expr` …) its `"state"`; `from_page`: a page's view into it (`keys`: some); the whole list checked first, the file written at once; a live page that took the commands and has not answered in 10 s: `results` null and a `note`, they are done there and never again on the file (one that never took them is taken for gone: the file) |
-| `view_get` | what a page shows (a live page's transfers of the buses: `view_edit` `bus_list`): bookmarks, arrows, markers (with `measures`: the Δ between them as a table in ns, the bound kept or not), spans, expressions (`exprs`), groups, highlight, colours, hidden, the copies of signals (`dups`), cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`, `show`), the gaps (`gaps`; live, on the waves, with `cut`; `by`: the expressions that cut) (live: with what the person changed); `full`: the whole state (its times in ns, the runs' window `runsOver` and a compare's `from` / `to` too); `view`: which view, on a page of several; `rows`: its signals (a pattern, `limit`, `offset`); `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
+| `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, expressions (their list, marks on the waves, the cursor on a match), the Assertions panel's search (`sva`: its matches, the waves only them), groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): the commands on a view of a `mkhtml.py` config, so a rebuild keeps them: `bookmark`, `arrow`, `span` on its own keys (a bookmark's `"at"` stays until a `t` replaces it), `view` its window, the rest of its look (`group`, `radix`, `marker`, `deltas`, `hide`, `paint`, `expr` …) its `"state"`; `from_page`: a page's view into it (`keys`: some); the whole list checked first, the file written at once; a live page that took the commands and has not answered in 10 s: `results` null and a `note`, they are done there and never again on the file (one that never took them is taken for gone: the file) |
+| `view_get` | what a page shows (a live page's transfers of the buses: `view_edit` `bus_list`): bookmarks, arrows, markers (with `measures`: the Δ between them as a table in ns, the bound kept or not), spans, expressions (`exprs`), groups, highlight, colours, hidden, your order of the rows (`order`), the copies of signals (`dups`), cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`, `from` and `to`: the window compared — `differ 0` is of it only —, `asked` when Compare asked one, `show`), the gaps (`gaps`; live, on the waves, with `cut`; `by`: the expressions that cut) (live: with what the person changed); `full`: the whole state (its times in ns, the runs' window `runsOver` and a compare's `from` / `to`, `first`, `shift`, `asked` and stretches too); `view`: which view, on a page of several; `rows`: its signals (a pattern, `limit`, `offset`); `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
 | `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `rotate`: a new key, so a copy of a page that carried the old one no longer connects (the pages linked before need `view_live` again); `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |
 
 The conventions are in the server's `instructions`: times are ns (a number) or a text with a unit, read as the viewer

@@ -77,6 +77,14 @@ class PngDiff(unittest.TestCase):
             P.write(os.path.join(got, 'x.png'), w, h, [bytes(min(255, v + 5) for v in r) for r in rows]); self.assertEqual(run().returncode, 0)
             P.write(os.path.join(got, 'y.png'), w, h, rows)
             r = run(); self.assertEqual(r.returncode, 1, r.stdout); self.assertIn('y.png: made, not in', r.stdout)
+            # guide-shots-check (review 2026-11-18 G-03): a committed picture not made fails, unless made by hand (--skip) or
+            # only some were made (--made, ONLY=); --how names the target in the message
+            os.remove(os.path.join(got, 'y.png')); P.write(os.path.join(want, 'z.png'), w, h, rows)
+            cli = lambda *x: subprocess.run([sys.executable, '-I', os.path.join(H.ROOT, 'tests', 'pngdiff.py'), want, got, *x], capture_output=True, text=True)
+            r = cli('--how', 'make guide-shots'); self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn('z.png: not made', r.stdout); self.assertIn('meant: make guide-shots', r.stdout)
+            self.assertEqual(cli('--skip', 'z.png').returncode, 0)
+            self.assertEqual(cli('--made').returncode, 0)
 
 
 class Embed(unittest.TestCase):

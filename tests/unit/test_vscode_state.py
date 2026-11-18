@@ -291,7 +291,9 @@ class LocateSva(unittest.TestCase):
                 f.write(text)
             progs = {'ws/sva/target/release/sva': ('#!/bin/sh\necho "usage: sva parse FILE"\n', 0o755),
                      'ws/bin/linux-x86_64/sva': ('#!/bin/sh\necho "something else" >&2\nexit 3\n', 0o755),
-                     'ws/out/sva-target/release/sva': ('#!/bin/sh\necho "usage: sva"\n', 0o644)}
+                     'ws/out/sva-target/release/sva': ('#!/bin/sh\necho "usage: sva"\n', 0o644),
+                     # one killed by the 5 s timer: no answer, not "runs here" (review 2026-11-13 B-24)
+                     'ws/sva/target/x86_64-pc-windows-gnu/release/sva.exe': ('#!/bin/sh\nsleep 8\necho "usage: sva"\n', 0o755)}
             for rel, (body, mode) in progs.items():
                 os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
                 with open(os.path.join(d, rel), 'w', encoding='utf-8') as f:
@@ -310,6 +312,7 @@ class LocateSva(unittest.TestCase):
         self.assertEqual(o['cands'][0], ['ws/sva/target/release/sva', ''], f'the one that runs first: {o["cands"]}')
         self.assertIn('not sva', cands['ws/bin/linux-x86_64/sva'])
         self.assertIn('cannot run', cands['ws/out/sva-target/release/sva'])
+        self.assertEqual(cands['ws/sva/target/x86_64-pc-windows-gnu/release/sva.exe'], 'no answer in 5 s', o['cands'])
         self.assertEqual(o['warnedAfter'], 1, 'trying the candidates offers nothing')
         self.assertTrue(o['items'][-2][0].endswith('Browse…') and o['items'][-1][0].endswith('The default'), o['items'])
         self.assertEqual(o['set'][0], os.path.join(d, 'ws/sva/target/release/sva'))
@@ -353,10 +356,23 @@ F.run(async () => {
   await new Promise(r => setTimeout(r, 300));
   const pids2 = [...t.procs].map(p => p.pid);
   out.evRunning = [pids2.length, t.codesQ.length];
+  // a read of the waves asked while evaluations wait: the slot left for the reads, at once (review 2026-11-18 V-06)
+  mode('args'); out.readPast = (await ask(23, { lod: 4, rid: 23 })).text ? 'read' : 'none'; mode('sleep');
   await A.send({ type: 'page' });
   out.evStopped = (await Promise.all(evs)).map(r => r.error);
   await new Promise(r => setTimeout(r, 300));
   out.evLeft = pids2.filter(alive).length;
+  // a read stopped before its first await is done (the FST's stat): never started, answered stopped (review 2026-11-18 V-05)
+  const early = ask(40, { lod: 4, rid: 40 }); await A.send({ type: 'codes-stop', rid: 40 });
+  out.early = [(await early).error, t.codesN];
+  // a spawn that throws at once (a NUL in the program's name; a .cmd on Windows): answered, its slot given back — two of them,
+  // then the program mended: the third read is answered (review 2026-11-18 V-02, 11-13 B-25)
+  const cfg = h.vscode.workspace.getConfiguration('wavelens'), good = cfg.get('sva');
+  await cfg.update('sva', 'sva\u0000x');
+  out.thrown = [(await ask(41, { lod: 4, rid: 41 })).error ? 'error' : 'text', (await ask(42, { lod: 4, rid: 42 })).error ? 'error' : 'text', t.codesN];
+  await cfg.update('sva', good); mode('args');
+  out.mended = await Promise.race([ask(43, { lod: 4, rid: 43 }).then(r => (r.text ? 'text' : r.error)), new Promise(r => setTimeout(() => r('NO ANSWER'), 4000))]);
+  mode('sleep');
   // a tab closed: the reads waiting never start (B-18)
   [30, 31, 32].forEach(id => ask(id, { lod: 4, rid: id }));
   await new Promise(r => setTimeout(r, 300));
@@ -398,8 +414,12 @@ class Codes(unittest.TestCase):
         self.assertEqual(o['running'], [2, 1], 'two CLIs at once, the third waits')
         self.assertEqual(o['stopped'], ['stopped'] * 3)
         self.assertEqual(o['left'], 0, 'the stopped reads\' CLIs killed')
-        self.assertEqual(o['evRunning'], [2, 1], 'evaluations in turn with the reads: two CLIs at once')
+        self.assertEqual(o['evRunning'], [1, 2], 'evaluations in turn with the reads, one at a time: a slot left for the reads (V-06)')
+        self.assertEqual(o['readPast'], 'read', 'a read of the waves while evaluations wait: answered at once (V-06)')
         self.assertEqual((o['evStopped'], o['evLeft']), (['stopped'] * 3, 0), 'a page made again: every read stopped, its CLI killed')
+        self.assertEqual(o['early'], ['stopped', 0], 'a read stopped before it is queued: never started (V-05)')
+        self.assertEqual(o['thrown'], ['error', 'error', 0], 'a spawn that throws: answered, its slot given back (V-02, 11-13 B-25)')
+        self.assertEqual(o['mended'], 'text', 'the program mended: the next read answered, not waiting for slots never given back')
         self.assertEqual(o['disposed'], [0, 0], 'a tab closed: nothing running, nothing waiting')
 
 WP8 = r'''

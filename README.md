@@ -18,7 +18,7 @@ transactions are three plugin scripts more, inlined into a page): no build step,
   under the waves of what was read and what went wrong (a JSON file's error at its line and column), the dump's busiest
   signals and the ones that never change.
 - **SystemVerilog assertions** bound to instances, evaluated over the dump (in the page and by a CLI for CI), every
-  attempt drawn on the waves, a failure taken apart step by step.
+  attempt drawn on the waves, a failure taken apart step by step; found by name, signal, instance or state (`@PREADY is:fail`).
 - **Expressions**: a list of conditions like the assertions', their matches marked on the waves and stepped through, the
   waves cut to them (✂).
 - **FSM states by name on a Questa VCD**: the design's types from Questa (a Tcl script in `vsim`) or Verilator, by
@@ -122,10 +122,13 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | [Modules](docs/guides/modules.html) | the tree of the modules: go to one, keep Only the ones you pick |
 | [Compare two runs](docs/guides/compare.html) | a second dump over the first: where they differ, step by step |
 | [Gaps](docs/guides/gaps.html) | the idle stretches cut out of a picture, WaveDrom or the waves themselves, live |
-| [Assertions (SVA)](docs/guides/sva.html) | bind, read the attempts, why one failed, edit and run again, reports for CI |
+| [Assertions (SVA)](docs/guides/sva.html) | bind, read the attempts, why one failed, find them by name, signal or state, edit and run again, reports for CI |
 | [Bus transactions](docs/guides/buses.html) | the ports found by their names, drawn as transfers |
 | [WaveDrom](docs/guides/wavedrom.html) | diagrams in your own page, the supported subset and the extensions |
 | [VS Code](docs/guides/vscode.html) | the extension over Remote-SSH or WSL |
+| [Runs](docs/guides/runs.html) | VS Code's Runs panel: runs kept by hand, shown in the tab, compared over a window, slices |
+| [Large dumps in VS Code](docs/guides/large.html) | a dump of gigabytes read by the window: summaries, exact windows, assertions by the CLI, the sva program |
+| [Keys, menus and the bar](docs/guides/keys.html) | where the keys go, the boxes after g z y [ ], the right button's menu, the bar, your own keys, VS Code, all the keys |
 | [Commands and scripts](docs/guides/commands.html) | the viewer's commands from the console, a script or a live page |
 | [cocotb tests](docs/guides/cocotb.html) | a test marks up its own waves on Verilator or Questa, each test apart, PASS or FAIL with the expected value |
 | [AI agents (MCP)](docs/guides/mcp.html) | the MCP server: questions about a dump, a page marked up for a person |

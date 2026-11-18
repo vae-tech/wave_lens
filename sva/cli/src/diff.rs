@@ -49,6 +49,7 @@ default 20): who differed first and what followed, by time only (no cause: the d
 compare as a page takes it (Compare…, the Runs panel, a config's \"compare\": {name, from, to, compared, differ, changes,
 first, signals {path: {spans, b}}, missing, map, notes?, segments?}), with B's values of the signals that differ over the
 window (vcd, shift; at most --cut-bytes, 32 MiB: else cutError says why), JSON on stdout (or --json FILE). TIME is a number with a unit (100ns, 2.5us; ps without one).
+--large-bytes N (for the tests): two dumps this large together say how far the comparison is (default 64 MiB).
 Exit status: 0 the dumps are equal over the window; 1 they differ; 2 usage, a dump that does not read, a signal not
 in it, no time in common.";
 

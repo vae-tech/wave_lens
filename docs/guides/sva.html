@@ -14,6 +14,7 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html" aria-current="page">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html">Keys</a>
   <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
@@ -236,13 +237,54 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   <tr><th>Do</th><th>Goes to</th></tr>
   <tr><td>click a line of the panel</td><td>that assertion: its group opens with its first failure (else its first pass) selected, the
     attempt in the middle of the window; click again for its next attempt</td></tr>
-  <tr><td><kbd>]a</kbd> / <kbd>[a</kbd></td><td>the next / previous assertion (its first failure, else its first pass)</td></tr>
+  <tr><td><kbd>]a</kbd> / <kbd>[a</kbd></td><td>the next / previous assertion (its first failure, else its first pass); with a
+    <a href="#find">search</a> in the panel, the next / previous of its matches</td></tr>
   <tr><td><kbd>]f</kbd> / <kbd>[f</kbd></td><td>the next / previous failure of any assertion</td></tr>
   <tr><td><span class="ui">SVA ◀ ✕ N ▶ ▾</span></td><td>the failures in the view, walked and listed by name (any number)</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>clears the selection (and the search, the highlight)</td></tr>
 </table>
 <p>The keys work once the waves have the focus (click the waves or a name). With more than three assertions on one instance the ones
   without failures start folded; <code>"svaShow": ["apb_*"]</code> limits which are drawn at all.</p>
+
+<h2 id="find">Finding assertions</h2>
+<p>With many checks the field <span class="ui">⌕</span> in the panel's head finds the ones you want: by their name, by a signal they
+  read, by the instance they are bound to, by how they went. The list, its <span class="ui">Table</span> and its
+  <span class="ui">Failures</span> show what it finds, and the totals line says how many (<code>1 of 14 match</code>); press
+  <span class="ui">Mask</span> beside it and the waves draw only those assertions too.</p>
+<figure><img src="img/sva-find.png" alt="The panel with @PREADY is:fail in its search field and Mask pressed: one assertion listed, its two failures; on the waves only its group" loading="lazy">
+<figcaption><b>A search.</b> <code>@PREADY is:fail</code>: the assertions that read <code>PREADY</code> and failed — one,
+  <code>apb_demo_no_wait</code>, with its two failures in the list under it; <span class="ui">Mask</span> pressed, its group alone on
+  the waves.</figcaption></figure>
+<p>Words apart by blanks all hold; <code>a,b</code> in a word is either; <code>!</code> before a word is not; <code>*</code> and
+  <code>?</code> mask the whole text, a word without them is a part of it; the case does not matter.</p>
+<table>
+  <tr><th>Word</th><th>Finds</th></tr>
+  <tr><td><code>apb_*</code>, <code>req,ack</code>, <code>stable</code></td><td>the label (and <code>label@instance</code>)</td></tr>
+  <tr><td><code>@PREADY</code>, <code>@*.u_apb.p*</code></td><td>the assertions that read a signal: by its name as the source writes it,
+    or by the full path it was bound to (the bindings know it: nothing of the dump is read, a large dump too)</td></tr>
+  <tr><td><code>in:*.u_dma*</code></td><td>the instance it is bound to</td></tr>
+  <tr><td><code>is:fail</code>, <code>is:pass</code>, <code>is:vacuous</code></td><td>a failure; no failure and a pass (a cover: a
+    match); neither</td></tr>
+  <tr><td><code>is:cover</code>, <code>is:assert</code>, <code>is:assume</code></td><td>its kind</td></tr>
+  <tr><td><code>is:unbound</code>, <code>is:error</code>, <code>is:capped</code>, <code>is:running</code></td><td>bound nowhere; cannot
+    bind or its evaluation failed; attempts capped; being evaluated</td></tr>
+</table>
+<ul>
+  <li>An assertion bound to several instances stays one line; only the bindings that match are listed under it
+    (<code>in:*.u_regs</code>: that one).</li>
+  <li>A word it does not understand (<code>is:fial</code>, a bare <code>@</code>) is said under the field in red and filters nothing.</li>
+  <li>Results not there yet — the page still evaluating, <code>sva eval</code> over a large dump — make a search by them say
+    <code>still evaluating</code>, not an empty list.</li>
+  <li><kbd>/</kbd> with the focus in the panel goes to the field, <kbd>Esc</kbd> empties it; <kbd>Enter</kbd> (shift: back) and
+    <kbd>]a</kbd> <kbd>[a</kbd> on the waves walk the matches, with or without Mask.</li>
+  <li>The right button on a signal: <span class="ui">Assertions on this signal</span> opens the panel with <code>@</code> and its path.</li>
+  <li><span class="ui">report.md</span> and <span class="ui">report.json</span> still report every binding.</li>
+</ul>
+<p>The search is kept in this browser over a reload and in the viewer's saved state as <code>"svaFilter": {"query": "@PREADY is:fail",
+  "mask": true}</code>; the setting <code>svaFilter</code> gives the one a page opens with, the command <code>sva</code>
+  (<code>{op: 'sva', filter: 'is:fail', mask: true}</code>) sets it from a script or an agent and answers what it finds
+  (<a href="commands.html">Commands</a>, <a href="mcp.html">MCP</a>). <code>svaShow</code> takes the same words as one text,
+  <code>"svaShow": "apb_* !is:cover"</code>; a list of labels and patterns means what it always did.</p>
 
 <h2 id="why">Why: an attempt taken apart</h2>
 <p>With an attempt selected the panel shows <b>Why</b>: the assertion's booleans — its steps, an <code>if</code> condition,
@@ -360,7 +402,8 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   failure (links), the longest attempt and the antecedent → consequent latency (min / avg / max cycles over the passing attempts: what a
   handshake check is about), the cover hits, the notes. <span class="ui">Failures</span>: every failed attempt by the time it was found,
   with its reason, filtered by assertion, <span class="ui">Copy</span> as text; a row selects the attempt (the first 500 are listed, the
-  downloads have the rest).</p>
+  filter and the downloads have the rest — of what the binding holds: a <a href="#large">large dump's</a> binding holds the failures
+  <code>sva eval</code> listed).</p>
 <figure><img src="img/sva-table.png" alt="The table of the APB bindings and the list of the two failures" loading="lazy">
 <figcaption><b>Table and Failures.</b> <code>apb_read_waits</code>: latency 3 / 3.0 / 3 (two wait states, then PREADY);
   <code>apb_demo_no_wait</code>: first failure 105 ns, last 115 ns; below, both failures with <code>expected PREADY at cycle 10</code> /
@@ -370,6 +413,31 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 <figure><img src="img/sva-report.png" alt="The Assertions section at the end of the generated APB page" loading="lazy">
 <figcaption><b>The page's report.</b> 14 assertions over the whole dump: 209 attempts, 47 pass, 2 fail, 160 vacuous; the three covers
   with their hits; the two failures.</figcaption></figure>
+
+<h2 id="large">A large dump</h2>
+<p>A large dump in VS Code is read as it is needed (<a href="vscode.html#large">VS Code</a>): an assertion's signals are read whole
+  first, and the page evaluates it as above. A signal that changes more than <code>lazyWhole</code> times over the dump (1 000 000: the
+  clock of a dump of 200 ms) is too busy for that; an assertion that reads one is evaluated by <b>the <code>sva</code> CLI</b> instead,
+  <code>sva eval</code> over the dump's FST on the host, the names resolved as the panel resolves them (a 5 M-cycle dump in about
+  5 s). The binding's line says <i>evaluating over the whole dump (sva eval)…</i>, then:</p>
+<ul>
+  <li><b>The counts</b> are the whole dump's; <b>the failures</b> and the attempts without verdict are listed (the first 20 000 by start,
+    with <code>sva eval --no-pass --max-attempts</code>; the line says <i>the first N of M listed</i> when there are more): on the waves,
+    in Failures, for <span class="ui">Go to first failure</span> and <kbd>]f</kbd> <kbd>[f</kbd>.</li>
+  <li><b>The passes</b> are only counted over the whole dump. Zoomed in to 20 000 cycles or fewer, 0.3 s after the zoom stops, one more
+    <code>sva eval</code> of that window and a span either side (for every such binding of the module) lists its passes and its failures past
+    the first 20 000: the line says <i>sva eval: N passes of this window</i>. Zoomed out it says <i>the passes listed zoomed in (≤ 20000
+    cycles)</i>. A window that failed says why on the line and is asked again once the view leaves it, or after 10 s.</li>
+  <li><b>Why</b> on such an attempt reads the signals over the attempt first. An attempt that starts before the window and ends in it
+    is not drawn. The ⓘ on the line says it was evaluated by <code>sva eval</code>, and a name the CLI read as another variable.</li>
+  <li>These results are evaluated again when the dump is opened, not kept in the browser; a saved state finds its attempt by its
+    cycles. An <a href="#expressions">expression</a> over such a signal is refused.</li>
+</ul>
+<figure><img src="img/sva-large.png" alt="A dump of 10 000 cycles read as it is needed, a_q bound: the line sva eval: 400 passes of this window, 4350 pass · 650 fail · 5000 vacuous; on the waves 300 ns with the failures where st is 2 and the passes after it" loading="lazy">
+<figcaption><b>An assertion over a busy clock, by the CLI.</b> A generated dump in a faked VS Code host (<code>lazyWhole</code> lowered
+  so that its clock is too busy): the counts of the whole dump, the failures listed, and the 400 passes of the 300 ns in sight
+  asked by a second <code>sva eval</code>. The search field shows the one binding (<code>a_q</code>).</figcaption></figure>
+<p>The same from a shell: <code>sva eval --no-pass --max-attempts 20000 --cycle-runs</code> (<a href="#cli">below</a>).</p>
 
 <h2 id="cli">From the command line (CI)</h2>
 <p>The same engine runs without a browser. <code>sva eval</code> prints a line per assertion and exits with a status a CI job can use:</p>
@@ -416,9 +484,25 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 <p>Other options of <code>sva eval</code>: <code>--assert NAME</code> (some only), <code>--from</code> / <code>--to</code> (a window),
   <code>--x fail|false</code> (how an x is taken), <code>--vacuous</code> (list vacuous attempts too), <code>--resolve up|scope</code>,
   <code>--ignore-prefix i_,o_</code>, <code>--alias NAME=PATH</code>, <code>-D NAME[=VALUE]</code>, <code>--max-threads N</code>,
-  <code>--out results.json</code>; <code>sva --waves DUMP --info</code> lists a dump's scopes, variables, widths and enum tables. <code>sva vcd x.fst --out x.vcd</code> writes an FST
+  <code>--out results.json</code>, <code>--json</code> (the results JSON on stdout instead of the lines), <code>--no-lane</code> (no
+  per-cycle strip in the JSON); <code>sva --waves DUMP --info</code> lists a dump's scopes, variables, widths and enum tables. <code>sva vcd x.fst --out x.vcd</code> writes an FST
   as VCD text (enum tables included), for a tool that reads only VCD.
   <code>sva &lt;command&gt; --help</code> has them all.</p>
+<p><b>For a large dump</b> (millions of cycles), three options keep the results small; the VS Code tab evaluates with them
+  (<a href="#large">below</a>):</p>
+<table>
+  <tr><th>Option</th><th>Does</th></tr>
+  <tr><td><code>--no-pass</code></td><td>the passes (and the vacuous attempts) are counted, not listed: the failures and the attempts
+    without verdict are</td></tr>
+  <tr><td><code>--max-attempts N</code></td><td>at most N attempts listed per assertion, the failures first (the first by start), then the
+    others by start; cut while the dump is evaluated, so an assertion failing on every cycle of 5 M holds N traces, not 5 M. The
+    JSON then carries <code>listed</code>: <code>{passes, of, longest, first_fail, last_fail}</code>, what the list lacks; the report says
+    <i>Failures (N of M listed)</i> and gives no latency, <code>sva diff --results</code> compares a cut list up to its last listed
+    start</td></tr>
+  <tr><td><code>--cycle-runs</code></td><td>the cycles' times in the JSON as runs, <code>"cycle_runs": [[first, step, count], …]</code>,
+    not a number per cycle (a 5 M-cycle dump's results: 2 MB instead of 180)</td></tr>
+</table>
+<p>The results JSON with all of these: <a href="../sva/ENGINE.md">ENGINE.md</a> and <code>docs/sva/results.schema.json</code>.</p>
 
 <h2 id="static">In a static SVG</h2>
 <p>A <code>"render": "svg"</code> view draws the same groups with every attempt's arrows, a legend of the steps (with their role:
@@ -434,7 +518,10 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
   <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
   <tr><td><code>svaOpen</code></td><td>false</td><td>the assertion list open when the page opens</td></tr>
   <tr><td><code>exprsOpen</code></td><td>false</td><td>the list of expressions open when the page opens and it has some</td></tr>
-  <tr><td><code>svaShow</code></td><td>all</td><td>which assertions are drawn on the waves (labels, <code>*</code> patterns)</td></tr>
+  <tr><td><code>svaShow</code></td><td>all</td><td>which assertions are drawn on the waves (labels, <code>*</code> patterns; or one text of
+    a <a href="#find">search</a>)</td></tr>
+  <tr><td><code>svaFilter</code></td><td>none</td><td>the panel's search when the page opens: a query, or <code>{"query": …, "mask":
+    true}</code> (the waves too)</td></tr>
   <tr><td><code>svaSignals</code></td><td><code>view</code></td><td>repeat the bound signals under the steps: in viewers
     (<code>view</code>), also in static SVGs (<code>true</code>), never (<code>false</code>)</td></tr>
 </table>
@@ -446,7 +533,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.62 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

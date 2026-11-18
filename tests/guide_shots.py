@@ -344,6 +344,44 @@ def viewer(S, ex, build):
         page.evaluate(f"WaveLens.setTheme('{th}')"); shots.settle(page)
         S.save('theme-' + th, v, upto=v.locator('.notes'))
     page.evaluate("WaveLens.setTheme('dark')")
+    page.evaluate("SVA.panels().forEach(p => { p.el.hidden = true; })")   # (shown again by the theme's redraw)
+    # the scroll bar under the waves, its thumb held: the window's ends over it
+    js("(v.reset(), v.zoomTo(60000, 120000), 0)"); shots.settle(page); S.quiet(page)
+    th = v.locator('.hsb .hsbt').first.bounding_box()
+    page.mouse.move(th['x'] + th['width'] / 2, th['y'] + th['height'] / 2); page.mouse.down(); shots.settle(page)
+    cv, hb = v.locator('canvas').bounding_box(), v.locator('.hsb').first.bounding_box()
+    S.save('viewer-scrollbar', clip={'x': v.bounding_box()['x'], 'y': cv['y'], 'width': v.bounding_box()['width'], 'height': hb['y'] + hb['height'] + 4 - cv['y']},
+           page=page)
+    page.mouse.up(); js("(v.zoomTo(v.M.t0, v.M.t1), 0)"); shots.settle(page)
+    # b: a bookmark at the cursor on the selected signal, its label asked in a small box there
+    js("(v.select('PSEL'), v.cursor = 85000, v.draw(), 0)"); v.locator('canvas').focus(); page.keyboard.press('b'); shots.settle(page)
+    page.keyboard.type('SETUP'); shots.settle(page)
+    box, cv = page.locator('.wv-ask').bounding_box(), v.locator('canvas').bounding_box()
+    S.save('viewer-bookmark-label', clip={'x': cv['x'] - 170, 'y': box['y'] - 120, 'width': box['x'] + box['width'] + 24 - (cv['x'] - 170),
+                                          'height': box['height'] + 200}, page=page)
+    page.keyboard.press('Escape'); shots.settle(page)
+    # your group renamed in place: a double-click (F2) on its name, the name in a box
+    js("(v.run([{ op: 'group', name: 'handshake', signals: ['PSEL', 'PENABLE', 'PREADY'] }]), 0)"); shots.settle(page); S.quiet(page)
+    n = v.locator('.names .row', has_text='handshake').first.bounding_box()
+    js(f"(v.renameGroup('handshake', {n['x'] + 8}, {n['y'] + n['height'] + 2}), 0)"); shots.settle(page)
+    page.keyboard.press('End'); page.keyboard.type(' (APB)'); shots.settle(page)
+    S.save('viewer-group-rename', clip=union(page.locator('.wv-ask').bounding_box(), dict(v.locator('.names').bounding_box(), height=10),
+                                             {'x': n['x'], 'y': n['y'] - 60, 'width': 620, 'height': 260}), page=page, pad=4)
+    page.keyboard.press('Escape'); js("(v.run([{ op: 'group', name: 'handshake', delete: true }]), 0)"); shots.settle(page)
+    page.close()
+
+    # your order of the rows: alt+↑ on a signal of a module, twice; the toast says its place
+    page = S.page(ex / 'apb' / 'apb_all.html', height=900)
+    shots.no_sva(page)
+    v = shots.view(page)
+    js = lambda e: shots.js(page, 0, e)   # noqa: E731
+    js("(v.setOnly({modules: ['apb_tb.u_regs'], open: ['apb_tb.u_regs']}), v.bodyEl.scrollTop = 0, v.draw(), 0)")
+    js("(v.select(v.M.rows.find(r => r.type === 'sig' && r.full === 'apb_tb.u_regs.PRDATA')), 0)"); v.locator('canvas').focus()
+    page.keyboard.press('Alt+ArrowUp'); page.keyboard.press('Alt+ArrowUp'); shots.settle(page)
+    page.evaluate("document.activeElement && document.activeElement.blur()"); page.mouse.move(0, 0); shots.settle(page)
+    print('    order:', js("JSON.stringify(v.order)"), js("v.root.querySelector('.toast')?.textContent"))
+    v.evaluate('e => e.scrollIntoView()'); shots.settle(page)
+    S.save('viewer-order', v, clip=dict(v.bounding_box(), height=560))
     page.close()
 
     # a generated page: hierarchy, module shading, highlight, find, paint
@@ -497,9 +535,16 @@ def compare(S, ex, build):
     v = shots.view(page, i)
     js = lambda e: shots.js(page, i, e)   # noqa: E731
     v.scroll_into_view_if_needed()
-    v.locator('input.cfile').set_input_files(str(d / 'apb_b.vcd')); page.wait_for_timeout(400); shots.settle(page)
-    print('    compare:', js("v.cmp && [v.cmp.differ, v.cmp.missing, v.cmp.first]"), 'data at', data, 'PREADY moved at', moved)
-    js("(v.zoomTo(40000, 200000), v.cursor = 40000, 0)"); shots.settle(page); S.quiet(page)
+    v.locator('input.cfile').set_input_files(str(d / 'apb_b.vcd')); page.wait_for_timeout(400); shots.settle(page)   # picks B
+    js("(v.zoomTo(40000, 200000), v.cursor = 40000, 0)"); shots.settle(page)
+    # B picked, nothing compared: the bar's B: apb_b.vcd ✕ and Compare lit, its toast kept
+    page.evaluate("document.activeElement && document.activeElement.blur()"); page.mouse.move(0, 0); shots.settle(page)
+    S.save('compare-picked', clip=dict(v.bounding_box(), height=v.locator('canvas').bounding_box()['y'] - v.bounding_box()['y'] + 150), page=page)
+    js("v.compareGo().then(() => 0)"); shots.settle(page); S.quiet(page)   # Compare (since 0.62 a pick compares nothing)
+    got = js("v.cmp && [v.cmp.differ, v.cmp.missing, v.cmp.first]")
+    print('    compare:', got, 'data at', data, 'PREADY moved at', moved)
+    if not got or not got[0]:
+        raise SystemExit(f'compare: nothing compared or no difference ({got}): the compare pictures would show none')
     S.save('compare-bands', v, upto=v.locator('.notes'))
     js("(v.select(null), v.diffStep(1), 0)"); shots.settle(page); S.quiet(page)
     S.save('compare-next', v, upto=v.locator('.notes'))
@@ -508,6 +553,14 @@ def compare(S, ex, build):
     js("(v.compareView('a', true), 0)"); shots.settle(page); S.quiet(page)
     S.save('compare-svg', picture(page, js("v.toSVG({from: 40000, to: 200000, width: 1180})")))
     page.evaluate("document.getElementById('pic')?.remove()")
+    # the window compared: zoomed out, the time outside 40–200 ns shaded and Compare lit (the window moved since)
+    js("(v.zoomTo(0, 205000), 0)"); shots.settle(page); S.quiet(page)
+    print('    zoomed out:', js("[v.cmpStale(), v.root.querySelector('button[data-act=dcmpgo]').hidden]"))
+    S.save('compare-window', v, upto=v.locator('.notes'))
+    # the mask off (▒, gb) and B shown (d): B's values on the rows, nothing over them
+    js("(v.zoomTo(40000, 200000), v.compareMask(false, true), 0)"); js("v.compareView('b', true).then(() => 0)"); shots.settle(page); S.quiet(page)
+    S.save('compare-nomask', v, upto=v.locator('.notes'))
+    js("(v.compareMask(true, true), 0)"); js("v.compareView('a', true).then(() => 0)")
     page.close()
 
 
@@ -585,6 +638,15 @@ def sva(S, ex, build):
     S.quiet(page)
     S.save('sva-bind', li)
     page.evaluate("WaveLens.configure({svaShow: null, svaSignals: null})")
+    # the search: @PREADY is:fail typed in ⌕, Mask pressed, the failures listed; the waves with its group alone
+    page.evaluate(f"(() => {{ const p = {p0}; p.open = true; p.showFails = true; p.render(); p.summary(); }})()")
+    v.locator('.sva:not(.xpanel) input.svqf').fill('@PREADY is:fail')
+    v.locator('.sva:not(.xpanel) [data-sv=qmask]').click(); page.wait_for_timeout(300); shots.settle(page)
+    page.evaluate(f"(() => {{ const p = {p0}; const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait'); p.v.fold(b.draw.gid, false, true); p.v.draw(); }})()")
+    shots.settle(page)
+    S.quiet(page)
+    S.save('sva-find', v, upto=v.locator('.notes'))
+    page.evaluate(f"(() => {{ const p = {p0}; p.setFilter({{ query: '', mask: false }}); p.showFails = false; p.open = false; p.render(); }})()")
     # the list of expressions, their marks and a row ƒ (no assertion groups on the waves)
     page.evaluate("(async () => { WaveLens.configure({svaShow: []}); await SVA.ready(); })()")
     page.evaluate(f"(() => {{ const p = {p0}; p.open = false; p.render(); }})()")
@@ -610,6 +672,74 @@ def sva(S, ex, build):
     sec = page.locator('section.sva-report, #assertions, section:has(h2:text("Assertions"))').first
     S.quiet(page)
     S.save('sva-report', sec)
+    page.close()
+    sva_large(S, ex, build)
+
+
+# a large dump's assertions by the CLI: a clock of 20 000 edges (1 ns), q high from 5 to 15 µs, st counting every 100 ns
+def big_vcd():
+    out = ['$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 " cnt [7:0] $end\n$var wire 1 # q $end\n'
+           '$var wire 3 $ st [2:0] $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nb0 "\n0#\nb0 $\n']
+    for i in range(1, 20001):
+        out.append(f'#{i}\n{i % 2}!\n' + (f'b{(i // 2) % 256:b} "\n' if i % 2 == 0 else '') + ('1#\n' if i == 5000 else '0#\n' if i == 15000 else '')
+                   + (f'b{(i // 100) % 8:b} $\n' if i % 100 == 0 else ''))
+    return ''.join(out)
+
+
+def sva_large(S, ex, build):
+    """sva-large: a large dump in a faked VS Code host — its FST read as it is needed (sva vcd --codes) and an assertion
+    over a clock too busy to read whole (lazyWhole lowered to 15 000) evaluated by sva eval over the whole dump, the passes
+    of the window in sight asked once it is narrow enough (the extension's svaEval: --cycle-runs --no-lane, --no-pass,
+    --max-attempts, --from --to)."""
+    import tempfile
+    exe = next((p for p in (build / 'sva-target' / 'release' / 'sva', ROOT / 'bin' / 'linux-x86_64' / 'sva') if p.exists()), None)
+    if exe is None:
+        raise SystemExit('sva-large: no sva CLI (make sva-build, or bin/linux-x86_64/sva)')
+    d = build / 'guides'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'big.vcd').write_text(big_vcd())
+    subprocess.run([str(exe), 'fst', str(d / 'big.vcd'), '--no-types', '-q'], check=True)
+    fst = d / 'big.fst'
+    head = subprocess.run([str(exe), 'vcd', str(fst), '--header'], capture_output=True, text=True, check=True).stdout
+
+    def codes(cs, win=None):
+        flags = [x for k in ('from', 'to', 'lod', 'keep') if (win or {}).get(k) is not None for x in ('--' + k, str(int(win[k])))]
+        return subprocess.run([str(exe), 'vcd', str(fst), '--codes', '-', *flags], input='\n'.join(cs), capture_output=True, text=True, check=True).stdout
+
+    def sva_eval(req):   # vscode/extension.js svaEval
+        t = pathlib.Path(tempfile.mkdtemp(dir=d)); out = t / 'results.json'
+        args = [str(exe), 'eval', '--waves', str(fst), '--resolve', 'scope', '--cycle-runs', '--no-lane', '--out', str(out)]
+        args += ['--scope', req['scope']] if req.get('scope') else []
+        args += [x for a in req.get('asserts') or [] for x in ('--assert', a)] + (['--no-pass'] if req.get('passes') is False else [])
+        args += [x for k, f in (('max', '--max-attempts'), ('from', '--from'), ('to', '--to')) if req.get(k) is not None
+                 for x in (f, str(int(req[k])) + ('' if k == 'max' else 'ps'))]
+        for i, f in enumerate(req['files']):
+            (t / str(i)).mkdir(); (t / str(i) / f['name']).write_text(f['source']); args += ['--sva', str(t / str(i) / f['name'])]
+        r = subprocess.run(args, capture_output=True, text=True)
+        if r.returncode not in (0, 1):
+            raise RuntimeError(r.stderr)
+        return out.read_text()
+    page = S.page(ex / 'apb' / 'apb.html', height=900)
+    page.expose_function('bigCodes', codes)
+    page.expose_function('bigEval', sva_eval)
+    got = page.evaluate("""async head => { document.querySelectorAll('body > *').forEach(e => { if (e.tagName !== 'SCRIPT') e.hidden = true; });
+      const a = document.createElement('div'); a.id = 'big'; document.body.prepend(a); a.style.cssText = 'padding:10px';
+      await SVA.loadFiles([{ name: 'big.sv', text: 'module tb;\\n  // q high: st is never 2\\n  a_q: assert property (@(posedge clk) q |-> st != 3\\'d2);\\nendmodule\\n' }]);
+      const doc = WaveLens.vcdToWave(head, { name: 'big.fst', lazy: true }).doc;
+      const v = new WaveLens.WaveView(a, doc, { loadCodes: (c, w) => window.bigCodes(c, w), evalSva: req => window.bigEval(req), lazyKeep: 256,
+        lazyBuckets: 512, lazyWhole: 15000, title: 'big.fst · a large dump in VS Code (a faked host)' });
+      await SVA.ready(); await v.need(v.M.rows);
+      const b = v.sva.bind('a_q', 'tb'); await v.sva.queue;
+      const T = b.results.cycles; v.sva.open = true; v.sva.setFilter({ query: 'a_q' }); v.sva.render(); v.sva.reveal(b); v.sva.unselect();
+      v.t0 = T[6100]; v.span = 300000; v.cursor = T[6100] + 150000; v.draw();
+      for (let i = 0; i < 200 && !(b.cli && b.cli.win); i++) await new Promise(r => setTimeout(r, 50));
+      v.draw(); window.scrollTo(0, 0);
+      return [b.via, b.error, b.results.assertions[0].stats, !!(b.cli && b.cli.win)]; }""", head)
+    print('    sva-large:', got)
+    if got[0] != 'cli' or not got[3]:
+        raise SystemExit(f'sva-large: not evaluated by the CLI, or no window asked: {got}')
+    shots.settle(page); page.wait_for_timeout(200); shots.settle(page); S.quiet(page)
+    S.save('sva-large', page.locator('#big'), upto=page.locator('#big .notes'))
     page.close()
 
 
@@ -650,6 +780,9 @@ def pages(S, ex, build):
     apb, axi, fsm = ex / 'apb' / 'apb.html', ex / 'axi_lite' / 'axi_lite.html', ex / 'fsm' / 'fsm.html'
     page = S.page(apb, height=900)
     shots.no_sva(page)
+    # the facts that change on every build frozen (review 2026-11-18 G-06): the time it was made, the version and the tree
+    page.evaluate("""document.querySelectorAll('.facts > div').forEach(d => { const k = d.querySelector('b')?.textContent, t = d.lastChild;
+        if (t && t.nodeType === 3 && (k === 'Generated' || k === 'WaveLens')) t.textContent = k === 'Generated' ? '2026-11-18 09:00' : '0.62'; })""")
     S.quiet(page)
     S.save('pages-head', page.locator('body'), clip={'x': 0, 'y': 0, 'width': 1280, 'height': 560}, page=page)
     page.close()
@@ -779,6 +912,470 @@ def mcp(S, ex, build):
     S.quiet(page)
     S.save('mcp-markup', v)
     page.close()
+
+
+# ---------------------------------------------------------------- a faked VS Code tab (the runs and the large dumps guides)
+VSC = 'https://wavelens.test'
+
+
+def sva_cli(build):
+    """The sva CLI: BUILD's (make sva-build), else the one the extension carries (bin/linux-x86_64/sva, make dist)."""
+    for exe in (build / 'sva-target' / 'release' / 'sva', ROOT / 'bin' / 'linux-x86_64' / 'sva'):
+        if exe.exists():
+            return exe
+    raise SystemExit('guide_shots: no sva CLI (make sva-build, or bin/linux-x86_64/sva)')
+
+
+class Tab:
+    """The VS Code extension's tab as tests/smoke.py's vscode sections fake it: vscode/media/host.js before the viewer, and
+    acquireVsCodeApi answered as vscode/extension.js answers — by the real sva CLI here: the dump served (an FST as its VCD
+    text; lazy: its FST's header, then the signals shown by sva vcd --codes), assertions over a lazy dump by sva eval, the
+    Runs panel by sva runs over a directory of runs (shown under the name shown_dir, as on a host). No CSP (the smoke
+    checks it); the fonts from Google Fonts, as the examples' pages have them."""
+
+    def __init__(self, S, build, dump, runs_dir=None, shown_dir='/home/me/apb/.wavelens-runs', lazy=False, note=None, config=None,
+                 height=900, width=1280, scheme='dark', now_mtime=1794996000):
+        import urllib.parse
+        self.exe, self.dump, self.dir, self.shown_dir, self.lazy, self.note = sva_cli(build), pathlib.Path(dump), runs_dir, shown_dir, lazy, note
+        self.tmp = build / 'guides' / 'tab'
+        self.tmp.mkdir(parents=True, exist_ok=True)
+        self.files, self.n, self.fst, self.star, self.now_mtime, self.asked = {}, 0, None, False, now_mtime, []
+        files = {'/host.js': ROOT / 'vscode' / 'media' / 'host.js'}
+        files.update({'/media/' + f: ROOT / 'wavelens' / f for f in ('wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js')})
+        host = {'name': self.dump.name, 'path': '/home/me/apb/' + self.dump.name, 'store': {'wavelens.given': 'yes'}, 'autoReload': False,
+                'keysLeft': ['ctrl+G'], 'config': config}
+        scripts = ''.join(f'<script src="{VSC}/media/{f}"></script>' for f in ('wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'))
+        html = ('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" '
+                'href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">'
+                f'<link rel="stylesheet" href="{VSC}/media/wavelens.css"></head><body class="vscode-{"light" if scheme == "light" else "dark"}">'
+                f'<script type="application/json" id="wavelens-host">{json.dumps(host)}</script>'
+                '<script type="application/wavedrom">{ "signal": [{ "name": "reading…", "wave": "x..." }] }</script>'
+                f'<script src="{VSC}/host.js"></script>{scripts}</body></html>')
+        fake = """(() => { window.__sent = [];
+          const reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
+          const here = { save: m => ({ path: '/home/me/apb/' + m.name }), pick: () => ({ files: [] }), 'state-read': () => ({ error: 'none' }),
+            compare: () => ({}), open: () => ({ ok: true }), sources: () => ({ texts: [] }), config: () => ({ config: null }), clip: () => ({ ok: true }),
+            http: () => ({ status: 0 }), bytes: () => ({ error: 'the fake host serves every file by its URI' }) };
+          window.acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(m) {
+            window.__sent.push(m && m.type); if (!m || !m.id) return;
+            const p = here[m.type] ? Promise.resolve(here[m.type](m)) : window.hostAsk(JSON.stringify(m)).then(JSON.parse);
+            p.then(r => reply(Object.assign({ id: m.id }, r)), e => reply({ id: m.id, error: String(e && e.message || e) })); } }); })();"""
+        page = S.b.new_page(color_scheme=scheme, viewport={'width': width, 'height': height})
+        page.on('console', lambda m: shots.errors.append(f'tab: {m.text}') if m.type == 'error' and 'fonts.g' not in m.text else None)
+        page.on('pageerror', lambda e: shots.errors.append(f'tab: {e}'))
+        page.add_init_script(fake)
+        page.expose_function('hostAsk', self.ask)
+
+        def serve(r):
+            path = urllib.parse.urlparse(r.request.url).path
+            f = files.get(path) or self.files.get(path)
+            r.fulfill(path=str(f)) if f else r.fulfill(status=404)
+        page.route(VSC + '/**', serve)
+        page.route(VSC + '/', lambda r: r.fulfill(body=html, content_type='text/html'))
+        self.page = page
+        page.goto(VSC + '/')
+        self.until("window.__sent.includes('ready')", 60000)
+        page.evaluate('document.fonts.ready')
+        page.add_style_tag(content='.wv-tip { display: none !important; } .wv .bar .ver { display: none !important; }')
+        shots.settle(page)
+
+    def until(self, expr, timeout=20000):
+        end = time.monotonic() + timeout / 1000
+        while not self.js(expr):
+            if time.monotonic() > end:
+                raise SystemExit(f'guide_shots: not true in {timeout / 1000} s: {expr}')
+            self.page.wait_for_timeout(50)
+
+    def js(self, e):   # an expression over v, the tab's viewer
+        return self.page.evaluate(f"(async () => {{ const v = window.WaveLens && WaveLens.views().find(x => x.root.isConnected); return {e}; }})()")
+
+    def run(self, *args, input=''):
+        return subprocess.run([str(self.exe), *map(str, args)], input=input, capture_output=True, text=True)
+
+    def serve(self, file):   # -> its URI in the tab
+        self.n += 1
+        key = f'/f/{self.n}/{pathlib.Path(file).name}'
+        self.files[key] = pathlib.Path(file)
+        return VSC + key
+
+    def src(self, file, name, lazy):   # the extension's srcOf -> {src, name, lazy}
+        file = pathlib.Path(file)
+        if lazy:
+            fst = file
+            if file.suffix != '.fst':
+                fst = self.tmp / f'{file.stem}.{self.n}.fst'
+                self.run('fst', file, '--no-types', '--quiet', '--out', fst).check_returncode()
+            head = self.tmp / f'{fst.stem}.head.vcd'
+            self.run('vcd', fst, '--header', '--out', head).check_returncode()
+            self.fst = fst
+            return {'src': self.serve(head), 'name': name, 'lazy': True}
+        if file.suffix == '.fst':
+            text = self.tmp / f'{file.stem}.{self.n}.vcd'
+            self.run('vcd', file, '--out', text).check_returncode()
+            file = text
+        self.fst = None
+        return {'src': self.serve(file), 'name': name, 'lazy': False}
+
+    def ask(self, text):
+        m = json.loads(text)
+        self.asked.append(m['type'] + (' ' + m['op'] if m.get('op') else ''))
+        try:
+            r = getattr(self, 'on_' + m['type'].replace('-', '_'))(m)
+        except Exception as e:   # noqa: BLE001  (the host's error, as the extension answers one)
+            r = {'error': f'{type(e).__name__}: {e}'}
+        return json.dumps(r)
+
+    def on_source(self, m):
+        r = self.src(self.dump, self.dump.name, self.lazy)
+        return {**r, 'store': {'wavelens.given': 'yes'}, **({'note': self.note} if self.note else {})}
+
+    def on_codes(self, m):
+        if not self.fst:
+            return {'error': 'this dump is read whole'}
+        flags = [x for k in ('from', 'to', 'lod', 'keep') if m.get(k) is not None for x in ('--' + k, str(int(m[k])))]
+        r = self.run('vcd', self.fst, '--codes', '-', *flags, input='\n'.join(map(str, m['codes'])))
+        return {'text': r.stdout} if r.returncode == 0 else {'error': r.stderr.strip()}
+
+    def on_sva(self, m):   # the extension's svaEval: sva eval over the dump's FST, the page's files
+        import tempfile
+        d = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        out = d / 'results.json'
+        args = ['eval', '--waves', self.fst, '--resolve', 'scope', '--cycle-runs', '--no-lane', '--out', out]
+        args += ['--scope', m['scope']] if m.get('scope') else []
+        args += ['--ignore-prefix', ','.join(m['ignore'])] if m.get('ignore') else []
+        args += [x for a in m.get('asserts') or [] for x in ('--assert', a)] + (['--no-pass'] if m.get('passes') is False else [])
+        args += [x for k, f in (('max', '--max-attempts'), ('from', '--from'), ('to', '--to')) if m.get(k) is not None
+                 for x in (f, str(int(m[k])) + ('' if k == 'max' else 'ps'))]
+        for i, f in enumerate(m['files']):
+            (d / str(i)).mkdir()
+            (d / str(i) / f['name']).write_text(f['source'])
+            args += ['--sva', d / str(i) / f['name']]
+        r = self.run(*args)
+        return {'text': out.read_text()} if out.exists() else {'error': r.stderr.strip() or f'sva eval: exit {r.returncode}'}
+
+    # the Runs panel (vscode/extension.js runs()): sva runs over self.dir
+    def runs_json(self):
+        return json.loads(self.run('runs', 'list', '--dir', self.dir, '--json').stdout)
+
+    def on_runs(self, m):
+        op, d = m['op'], self.dir
+        said = ((['--name', m['name'].strip()] if (m.get('name') or '').strip() else []) +
+                (['--tags', ','.join(m['tags'])] if isinstance(m.get('tags'), list) else []) +
+                (['--comment', m['comment']] if isinstance(m.get('comment'), str) else []))
+        dir_of = {'set': '.wavelens-runs' if self.star else '', 'scope': 'workspace' if self.star else ''}
+        win = [f"{round(m['from'])}ps", f"{round(m['to'])}ps"] if m.get('from') is not None and m.get('to') is not None else None
+        if op == 'list':
+            r = json.loads(self.run('runs', 'list', self.dump, '--dir', d, '--json').stdout)
+            return {'dir': self.shown_dir, 'dirOf': dir_of, 'runs': r.get('runs', []), 'others': r.get('others', 0),
+                    'now': {'name': self.dump.name, 'mtime': self.now_mtime * 1000, 'bytes': self.dump.stat().st_size}, 'shown': 0}
+        if op == 'dir':
+            self.star = bool(m.get('keep'))
+            return {'dir': self.shown_dir, 'dirOf': {'set': '.wavelens-runs' if self.star else '', 'scope': 'workspace' if self.star else ''}}
+        if op == 'open':
+            if not m.get('run'):
+                return self.on_source(m)
+            run = next((x for x in self.runs_json()['runs'] if x['id'] == m['run']), None)
+            if not run:
+                return {'error': f"no run #{m['run']}"}
+            return self.src(pathlib.Path(d) / run['file'], f"#{run['id']} {run['name']}", self.lazy)
+        if op == 'keep':
+            src = self.dump
+            if win and m.get('of'):
+                src = pathlib.Path(d) / next(x for x in self.runs_json()['runs'] if x['id'] == m['of'])['file']
+            r = self.run('runs', 'keep', src, '--dir', d, *said, *(['--from', win[0], '--to', win[1]] if win else []), '--json')
+            if r.returncode:
+                return {'error': r.stderr.strip()}
+            fix_times(self.dir)
+            return {'run': next(x for x in self.runs_json()['runs'] if x['id'] == json.loads(r.stdout)['id'])}
+        if op == 'cut':
+            return {'path': f"/home/me/apb/{self.dump.stem}.{win[0][:-2]}-{win[1][:-2]}ps.fst"}
+        if op == 'set':
+            r = self.run('runs', 'set', m['run'], '--dir', d, *said, '--json')
+            return {'run': json.loads(r.stdout)} if r.returncode == 0 else {'error': r.stderr.strip()}
+        if op == 'rm':
+            return {'cancelled': True}
+        if op in ('diff', 'compare'):
+            args = ['runs', 'diff', self.dump, '--dir', d, '--against', m.get('against') or 'now', '--signals-from', '-']
+            args += ['--json'] if op == 'diff' else ['--run', m.get('run') or 'now', '--page', '--quiet']
+            args += [x for k in ('from', 'to') if m.get(k) is not None for x in ('--' + k, f'{round(m[k])}ps')]
+            args += ['--case', m['case']] if m.get('case') else []
+            r = self.run(*args, input='\n'.join(map(str, m.get('signals') or [])) + '\n')
+            if r.returncode not in (0, 1):
+                return {'error': r.stderr.strip()}
+            out = json.loads(r.stdout)
+            return out if op == 'diff' else {'result': out}
+        if op == 'cancel':
+            return {'ok': True}
+        return {'error': 'no ' + op}
+
+    def close(self):
+        self.page.close()
+
+
+def tab_clip(page, log=False):
+    """The tab as it is in the window: the viewer from its bar down to its log line (sticky at the window's foot), the line
+    itself with log (its last message; a read's says how long it took: a picture another on every run)."""
+    return page.evaluate("""log => { const v = document.querySelector('.wv').getBoundingClientRect(), l = document.querySelector('.wv .wlog');
+        const r = l && !l.hidden ? l.getBoundingClientRect() : null, b = r ? (log ? r.bottom : r.top) : Math.min(v.bottom, innerHeight);
+        return { x: v.x, y: v.y, width: v.width, height: Math.min(b, innerHeight) - v.y }; }""", log)
+
+
+def fix_times(runs_dir, day='2026-11-17'):
+    """The runs' times fixed, so a picture is the same on every run: run k kept at 08:00 + k hours of that day."""
+    f = pathlib.Path(runs_dir) / 'runs.json'
+    j = json.loads(f.read_text())
+    for r in j['runs']:
+        r['kept'] = r['source_mtime'] = f"{day}T{8 + r['id']:02d}:{10 * r['id'] % 60:02d}:00Z"
+    f.write_text(json.dumps(j, indent=2) + '\n')
+
+
+def keep_run(build, dump, runs_dir, text, name, tags=(), comment=''):
+    """A run kept from a dump's text, as Keep this dump… keeps it (the text written as the dump, the dump put back after)."""
+    dump = pathlib.Path(dump)
+    was = dump.read_bytes() if dump.exists() else None
+    dump.write_text(text)
+    r = subprocess.run([str(sva_cli(build)), 'runs', 'keep', str(dump), '--dir', str(runs_dir), '--name', name, '--tags', ','.join(tags),
+                        '--comment', comment, '--json'], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit(f'guide_shots: sva runs keep: {r.stderr}')
+    if was is not None:
+        dump.write_bytes(was)
+
+
+# ---------------------------------------------------------------- the runs guide
+# the Runs panel wider than its default, at the foot of the waves' left part (the differences at 115 ns and 155 ns in sight)
+PLACE = ("(w => Object.assign(v.runsP.el.style, { width: '560px', height: '360px', left: (w.left + 8) + 'px', "
+         "top: (Math.min(w.bottom, innerHeight - 30) - 366) + 'px' }))(v.wcol.getBoundingClientRect())")
+
+
+def runs(S, ex, build):
+    """The Runs panel of a VS Code tab of the APB example: three runs kept (golden and nightly: the example's dump; slave
+    rework: run B of the compare guide), the dump of now the rework's."""
+    import shutil
+    d = build / 'guides' / 'runs'
+    shutil.rmtree(d, ignore_errors=True)
+    d.mkdir(parents=True)
+    a = (ex / 'apb' / 'apb.vcd').read_text()
+    b = b_dump(ex / 'apb' / 'apb.vcd')[0]
+    dump, rd = d / 'apb.vcd', d / '.wavelens-runs'
+    keep_run(build, dump, rd, a, 'golden', ['base'], 'before the slave change')
+    keep_run(build, dump, rd, a, 'nightly', ['ci'], 'the same RTL, run by CI')
+    keep_run(build, dump, rd, b, 'slave rework', ['wip'], 'PREADY from the new slave FSM')
+    fix_times(rd)
+    dump.write_text(b)   # the dump of now: the simulation after the change
+    T = Tab(S, build, dump, rd, height=780, width=1560)
+    page, js = T.page, T.js
+    v = page.locator('.wv').first
+    # the modules folded but the top: the testbench's signals and the panel over the right of the waves
+    js("(v.collapseAll(), v.fold(+Object.keys(v.M.groups).find(k => v.M.groups[k].name === 'apb_tb'), false), 0)")
+    shot = lambda name, log=False: (shots.settle(page), S.quiet(page), S.save(name, page=page, clip=tab_clip(page, log)))   # noqa: E731
+    panel = lambda name: (shots.settle(page), S.quiet(page), S.save(name, v.locator('.wv-runs')))   # noqa: E731
+    js("(v.runsPanel(true), 0)")
+    T.until("v.runsP && v.runsL && v.runsP.rowsEl.children.length === 4")
+    js(f"({PLACE}, 0)")
+    shot('runs-panel')
+    # Keep this dump…: the form, filled (cancelled: nothing kept)
+    v.locator('.wv-runs [data-a=keep]').click()
+    v.locator('.wv-runs .rfn').fill('slave rework 2')
+    v.locator('.wv-runs .rft').fill('wip, seed7')
+    v.locator('.wv-runs .rfc').fill('PREADY one cycle earlier')
+    panel('runs-keep')
+    v.locator('.wv-runs [data-a=cancel]').click()
+    # #1 golden picked as B: its B in a dashed box, Compare lit in the panel and the bar, nothing read
+    v.locator('.wv-runs .rn[data-i="3"] .nm').click()
+    T.until("v.runPickB === 1")
+    shot('runs-picked')
+    # Compare: A (now) with B (#1) over the window in sight
+    js("(v.zoomTo(40000, 200000), 0)")
+    v.locator('.wv-runs [data-a=go]').click()
+    T.until("v.cmp && v.runCur === 1")
+    shot('runs-compared', log=True)   # (its log line the compare's: no time of a read in it)
+    # Δ all: every run against A over the same window
+    v.locator('.wv-runs [data-a=all]').click()
+    T.until("v.runsP.deltas.size >= 3")
+    panel('runs-delta-all')
+    # the Open mode: a row chosen opens its waves (A), nothing compared
+    v.locator('.wv-runs [data-a=mopen]').click()
+    v.locator('.wv-runs .rn[data-i="2"] .nm').click()
+    T.until("v.runsA() === 2 && v.runsP && v.runsP.rowsEl.children.length === 4")
+    shot('runs-open')
+    # slices: the dump of now again, the range over the read at 115 ns kept as a slice from Range ▸ (the panel closed for the menu)
+    v.locator('.wv-runs [data-a=mcmp]').click()
+    js("v.runsShow(0).then(() => 0)")
+    T.until("v.runsA() === 0 && v.runsP && v.runsP.rowsEl.children.length === 4 && v.M.rows.length > 20")
+    js("(v.runsPanel(false), v.zoomTo(40000, 200000), v.setRange(110000, 130000, v.M.rows.find(r => r.name === 'PRDATA')), v.select('PRDATA'), 0)")
+    shots.settle(page)
+    bb = page.locator('.wv canvas').first.bounding_box()
+    js(f"(v.menu({bb['x'] + 420}, {bb['y'] + 330}, v.M.rows.find(r => r.name === 'PRDATA'), v.range), 0)")
+    page.locator('.wv-menu .subr').hover()
+    shots.settle(page)
+    S.save('runs-slice-menu', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .subr + .sub').bounding_box()), page=page, pad=6)
+    page.locator('.wv-menu [data-m=slkeep]').click()
+    T.until("v.runsL && v.runsL.length === 4 && v.runsP && v.runsP.rowsEl.children.length === 5")
+    # golden shown (A), the slice's span on it: ↔ on the slice's row
+    js("v.runsShow(1).then(() => 0)")
+    T.until("v.runsA() === 1 && v.runsP && v.runsP.rowsEl.children.length === 5")
+    js(f"({PLACE}, v.zoomTo(40000, 200000), 0)")
+    v.locator('.wv-runs .rn[data-i="1"] [data-a=sp]').click()
+    T.until("!!v.range")
+    shot('runs-slice-span')
+    # ★: this directory the permanent one (the setting wavelens.runsDir written)
+    v.locator('.wv-runs [data-a=star]').click()
+    T.until("v.runsP && v.runsP.el.querySelector('.rstar.on')")
+    panel('runs-dir')
+    print('    asked:', ', '.join(sorted(set(T.asked))))
+    T.close()
+
+
+# ---------------------------------------------------------------- the large dumps guide
+SOC_CYC, SOC_N = 10000, 520000   # a 100 MHz clock for 5.2 ms: 1 040 000 changes, more than lazyWhole
+SOC_SV = '''module bus_checks (input logic clk, rst_n, valid, ready);
+    // why: a beat offered stays offered until the slave takes it
+    a_hold: assert property (@(posedge clk) disable iff (!rst_n) valid && !ready |=> valid);
+endmodule
+'''
+
+
+def soc_vcd(path):
+    """A dump of a design's shape, busy enough to be read by the window: tb (clk, rst_n, irq), tb.u_bus (a valid / ready
+    stream: a burst of 16 beats every 20 µs, a stall in every seventh, one beat dropped while stalled at 2.721 ms), tb.u_dma
+    (a count of the beats), tb.u_cpu.core0 / core1 (a pc every 4 and 3 cycles: busy rows). The clock is aliased into the
+    modules, as simulators write it."""
+    sig = [('tb', 'clk', '!', 1), ('tb', 'rst_n', '"', 1), ('tb', 'irq', '#', 1),
+           ('tb.u_bus', 'clk', '!', 1), ('tb.u_bus', 'rst_n', '"', 1), ('tb.u_bus', 'valid', '$', 1), ('tb.u_bus', 'ready', '%', 1),
+           ('tb.u_bus', 'data', '&', 32), ('tb.u_bus', 'state', "'", 2),
+           ('tb.u_dma', 'clk', '!', 1), ('tb.u_dma', 'count', '(', 16), ('tb.u_dma', 'done', ')', 1),
+           ('tb.u_cpu', 'stall', '-', 1), ('tb.u_cpu.core0', 'pc', '*', 32), ('tb.u_cpu.core1', 'pc', '+', 32)]
+    out = ['$timescale 1ps $end']
+    scope = []
+    for s, n, c, w in sig:
+        want = s.split('.')
+        while scope and scope != want[:len(scope)]:
+            out.append('$upscope $end'); scope.pop()
+        while len(scope) < len(want):
+            scope.append(want[len(scope)]); out.append(f'$scope module {scope[-1]} $end')
+        out.append(f'$var wire {w} {c} {n}' + (f' [{w - 1}:0]' if w > 1 else '') + ' $end')
+    out += ['$upscope $end'] * len(scope) + ['$enddefinitions $end', '#0', '$dumpvars', '0!', '0"', '0#', '0$', '1%', 'b0 &', "b0 '", 'b0 (', '0)',
+                                             '0-', 'b0 *', 'b0 +', '$end']
+    ch = {}   # cycle -> the changes at its rising edge
+
+    def at(c, line):
+        ch.setdefault(c, []).append(line)
+    at(5, '1"')
+    count, word = 0, 0x1000
+    for k, c0 in enumerate(range(100, SOC_N - 100, 2000)):
+        stall = k % 7 == 3
+        drop = k == 136   # (a stalled burst: k % 7 == 3)
+        at(c0, "b1 '")
+        c = c0
+        for beat in range(16):
+            word += 1
+            at(c, '1$'); at(c, f'b{word:b} &')
+            if stall and beat == 5:
+                at(c, '0%'); c += 1
+                if drop:
+                    at(c, '0$')   # the beat dropped while the slave stalls: a_hold fails here
+                    c += 1; at(c, '1$')
+                at(c, '1%')
+            count += 1
+            at(c + 1, f'b{count:b} (')
+            c += 1
+        at(c, '0$'); at(c, "b10 '"); at(c, '1)')
+        at(c + 1, '0)'); at(c + 1, "b0 '")
+        at(c + 2, '1#'); at(c + 4, '0#')
+        if k % 5 == 2:
+            at(c + 6, '1-'); at(c + 30, '0-')
+    with open(path, 'w') as f:
+        f.write('\n'.join(out) + '\n')
+        for c in range(1, SOC_N + 1):
+            t = c * SOC_CYC
+            f.write(f'#{t}\n1!\n')
+            if c % 4 == 0:
+                f.write(f'b{0x400000 + 4 * c:b} *\n')
+            if c % 3 == 0:
+                f.write(f'b{0x800000 + 4 * c:b} +\n')
+            if c in ch:
+                f.write('\n'.join(ch[c]) + '\n')
+            f.write(f'#{t + SOC_CYC // 2}\n0!\n')
+    return path
+
+
+def large(S, ex, build):
+    """A VS Code tab of a large dump: its FST's header first, then the rows shown by the window (sva vcd --codes), an
+    assertion over the busy clock by sva eval; and a VCD read whole for want of the CLI (its note)."""
+    d = build / 'guides' / 'large'
+    d.mkdir(parents=True, exist_ok=True)
+    dump = d / 'soc.vcd'
+    if not dump.exists() or dump.stat().st_mtime < pathlib.Path(__file__).stat().st_mtime:
+        soc_vcd(dump)
+    T = Tab(S, build, dump, lazy=True, height=760, width=1280)
+    page, js = T.page, T.js
+    v = page.locator('.wv').first
+    shot = lambda name: (shots.settle(page), S.quiet(page), S.save(name, page=page, clip=tab_clip(page)))   # noqa: E731
+    read = "v.lazy && !WaveLens.internal.peek(v).vis.some(r => r.lazy) && !v.winAsk"
+    T.until(read, 60000)
+    shot('large-open')
+    # the modules opened: their rows read, the busy ones (the clock, the pcs) as their summary; the cursor's values '…' there
+    js("(['u_bus', 'u_cpu', 'core0', 'core1'].forEach(n => v.fold(+Object.keys(v.M.groups).find(k => v.M.groups[k].name === n), false)), "
+       "v.cursor = 1000e6, v.select('tb.u_cpu.core0.pc'), v.draw(), 0)")
+    T.until(read, 60000)
+    shot('large-summary')
+    # zoomed in on the dropped beat: the busy rows read again for the window, exact
+    js("(v.zoomTo(2720.8e6, 2721.6e6), v.cursor = 2721.06e6, v.select('tb.u_bus.valid'), 0)")
+    page.wait_for_timeout(400)
+    T.until(read + " && !WaveLens.internal.peek(v).vis.some(r => r.full === 'tb.clk' && r.sum && !r.tr.length)", 60000)
+    page.wait_for_timeout(300)
+    shot('large-window')
+    # an assertion over the busy clock: evaluated over the whole dump by sva eval (the extension's svaEval), its failure
+    # selected, the passes of the time shown asked as a window
+    page.evaluate("""async sv => { await SVA.ready(); await SVA.loadFiles([{ name: 'bus_checks.sv', text: sv }]);
+        const p = SVA.panels()[0]; p.bind('a_hold', 'tb.u_bus'); await p.queue; }""", SOC_SV)
+    T.until("(b => b && b.results && !b.running && b.cli && b.cli.win)(SVA.panels()[0].bindings.find(b => b.assert === 'a_hold'))", 120000)
+    js("""(p => { const b = p.bindings.find(b => b.assert === 'a_hold'); p.open = true; p.render();
+        p.select(b, b.results.assertions[0].attempts.findIndex(a => a.result === 'fail')); return 0; })(SVA.panels()[0])""")
+    page.wait_for_timeout(400)
+    shot('large-sva')
+    li = page.locator('.wv .sva:not(.xpanel) li[data-a="a_hold"]').first
+    li.evaluate("e => e.scrollIntoView({ block: 'center' })")   # (not under the bar, sticky at the window's top)
+    S.quiet(page)
+    S.save('large-sva-line', li)
+    print('    asked:', ', '.join(sorted(set(T.asked))))
+    T.close()
+    # no sva on the host: the VCD read whole, the extension's note in the toast
+    T = Tab(S, build, dump, lazy=False, height=400, width=1280,
+            note='soc.vcd: read whole (not lazy): there is no sva CLI on this host (sva; none bundled for darwin-arm64): set wavelens.sva '
+                 'to its path (WaveLens: Set the sva program…; the repository builds one: make dist)')
+    T.until("!!v && v.root.querySelector('.bar .toast').textContent.includes('read whole')", 60000)
+    shots.settle(T.page)
+    T.page.mouse.move(0, 0)
+    box = T.page.locator('.wv').first.bounding_box()
+    S.save('large-nocli', page=T.page, clip={'x': box['x'], 'y': box['y'], 'width': box['width'], 'height': 52})
+    T.close()
+
+
+# ---------------------------------------------------------------- the keys guide
+def keys(S, ex, build):
+    """The boxes after z and ], and the right button's menu with Range ▸ open, on the APB example (the viewer guide has the
+    box after g, the keys box, Show as ▸, the bar's menus)."""
+    page = S.page(ex / 'apb' / 'apb.html', height=1000)
+    shots.no_sva(page)
+    v = shots.view(page)
+    js = lambda e: shots.js(page, 0, e)   # noqa: E731
+    S.quiet(page)
+    for k, name in (('z', 'keys-z'), (']', 'keys-bracket')):
+        js(f"(v.keyHintOn({json.dumps(k)}), v.keyHintShow({json.dumps(k)}), 0)"); shots.settle(page)
+        S.save(name, clip=page.locator('.wv-keys').bounding_box(), page=page, pad=6)
+        js('(v.keyHintOff(), 0)')
+    bb = v.locator('canvas').bounding_box()
+    js("(v.setRange(45000, 105000, v.M.rows.find(r => r.name === 'PADDR')), v.select('PADDR'), 0)"); shots.settle(page)
+    js(f"(v.menu({bb['x'] + 300}, {bb['y'] + 200}, v.M.rows.find(r => r.name === 'PADDR'), v.range), 0)")
+    page.locator('.wv-menu .subr').hover(); shots.settle(page)   # Range ▸ open
+    S.save('keys-menu-range', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .subr + .sub').bounding_box()), page=page, pad=6)
+    js('(v.closeMenu(), v.setRange(null), 0)')
+    page.close()
+
+
+GUIDES += ['runs', 'large', 'keys']   # the guides of these last sections (their own line: the list above is the other guides')
 
 
 def main():

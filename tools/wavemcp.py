@@ -1141,7 +1141,7 @@ def ns_out(results, timed):
         return results
     t = lambda v: ns(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
     keys = {'cursor': ('t',), 'cursor2': ('t',), 'edge': ('t',), 'view': ('from', 'to'), 'fit': ('from', 'to'), 'expr_go': ('t',),
-            'expr': EXPR_TIMES, 'expr_matches': EXPR_TIMES, 'bookmark': ('t', 'from'), 'fsm_go': ('t',), 'compare': ('first',),
+            'expr': EXPR_TIMES, 'expr_matches': EXPR_TIMES, 'bookmark': ('t', 'from'), 'fsm_go': ('t',), 'compare': ('first', 'from', 'to'),
             'goto': ('t',)}   # (review 2026-11-05 B-12)
     out = []
     for r in results:
@@ -1208,6 +1208,16 @@ def state_conv(st, f):
     for k in ('runsOver', 'compare'):   # the window the runs are compared over, the compare's (B-51)
         if isinstance(st.get(k), dict):
             st[k] = dict(st[k], **{e: t(st[k][e]) for e in ('from', 'to') if num(st[k].get(e))})
+    c = st.get('compare')
+    if isinstance(c, dict):   # its other times too: the first difference, B's offset, the window asked, the stretches (review 2026-11-18 M-06)
+        c = dict(c, **{e: t(c[e]) for e in ('first', 'shift') if num(c.get(e))})
+        if isinstance(c.get('asked'), dict):
+            c['asked'] = dict(c['asked'], **{e: t(c['asked'][e]) for e in ('from', 'to') if num(c['asked'].get(e))})
+        if isinstance(c.get('signals'), dict):
+            c['signals'] = {p: dict(x, spans=[[t(a), t(b)] if num(a) and num(b) else [a, b] for a, b in x['spans']])
+                            if isinstance(x, dict) and isinstance(x.get('spans'), list) and all(isinstance(s, list) and len(s) == 2 for s in x['spans']) else x
+                            for p, x in c['signals'].items()}
+        st['compare'] = c
     return st
 
 
@@ -1295,6 +1305,9 @@ def summary(st, timed, base=None):
         out['sort'] = c['sort']
     if c.get('style') not in (None, 'auto'):
         out['style'] = c['style']
+    for k in ('compareMask', 'scrollbar'):   # (M-07) off: said; on is the default
+        if c.get(k) is False:
+            out[k] = False
     if c.get('cycles'):
         out['cycles'] = {'clock': c.get('cycleClock'), 'zero': t(c['cycleZero']) if c.get('cycleZero') is not None else None}
     g = ed.gap_opt()
@@ -1303,8 +1316,11 @@ def summary(st, timed, base=None):
                        ('aux', 'gapAux'), ('only', 'gapOnly'), ('by', 'gapBy')) if g.get(k)}}
     cmp = st['compare'] if 'compare' in st else ed.compare() if ed.m.doc else None
     if isinstance(cmp, dict):
+        # the window compared with it (review 2026-11-18 M-01): "differ 0" is of from … to, not of the runs
         s = viewedit.compare_summary(cmp)
-        out['compare'] = dict(s, first=t(s['first']) if s['first'] is not None else None, show=st.get('compareShow') or cmp.get('show') or 'a')
+        out['compare'] = dict(s, **{k: t(s[k]) if s.get(k) is not None else None for k in ('first', 'from', 'to')},
+                              **({'asked': {k: t(x) if x is not None else None for k, x in s['asked'].items()}} if s.get('asked') else {}),
+                              show=st.get('compareShow') or cmp.get('show') or 'a')
     return out
 
 
@@ -1744,13 +1760,16 @@ def live_compare(op, where, v, a):
         if not exe:
             raise WaveError('compare dump: needs the sva CLI (make sva-build, or bin/<os>-x86_64/sva)')
         b = os.path.join(os.path.dirname(path), os.path.expanduser(str(args['dump'])))
-        res = svabuild.compare(exe, args.get('a') or path, b, None, None, None, args.get('map'), args.get('offset'))
+        win = viewedit.window_of(args)   # from … to: that window only (review 2026-11-18 M-03)
+        res = svabuild.compare(exe, args.get('a') or path, b, None, win and win[0], win and win[1], args.get('map'), args.get('offset'))
+        if win:
+            res['asked'] = {'from': win[0], 'to': win[1]}
     elif path:
         pg = viewedit.Page(path)
         res = viewedit.compare_dump(pg.model(pg.view(v.get('key'))), os.path.dirname(os.path.abspath(path)), args)
     else:
         raise WaveError('compare dump: the live page has no file here to find its dump beside: give "page", or "a" with the dump of its waves')
-    return {'op': 'compare', 'result': res, **({'show': op['show']} if op.get('show') is not None else {})}
+    return {'op': 'compare', 'result': res, **{k: op[k] for k in ('show', 'mask') if op.get(k) is not None}}
 
 
 def live_edit(a, where, v):
@@ -1982,7 +2001,9 @@ TOOLS = [
          'color (null: pale again), its label at the top of the rows, with signal in a thin line over that row (lift "below": under it, the lines '
          'lifted bookmarks use; signal null: at the top again); the person drags it from line to line. expr: a condition in the page\'s list '
          '(text), marked band, line or strip, gap: the waves cut to its matches with the others that have it, answers n, time, share, first, '
-         'last, min, max, on a file only id. A live page that took the ops and answers after 10 s: results null, applied there, '
+         'last, min, max, on a file only id. sva: the Assertions panel\'s search, filter "apb_* @PREADY in:*.u_dut is:fail" (* ? masks, '
+         'a,b either, !x not), mask: the waves only its matches; live it answers them [{assert, scope, signals, state, counts}], a file '
+         'the query\'s errors. A live page that took the ops and answers after 10 s: results null, applied there, '
          'never again on the file.',
          {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B, 'from_page': S,
           'keys': {'type': 'array', 'items': S}}, (), ro=False),

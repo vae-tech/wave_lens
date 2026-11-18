@@ -14,6 +14,7 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html" aria-current="page">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html">Keys</a>
   <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
@@ -31,8 +32,8 @@
     <code>work/my.html</code>: one self-contained file with every view of the config, each a viewer. How the page and its config are made is
     the subject of <a href="pages.html">Dump → page</a>.</li>
   <li><b>A dump read in the page.</b> Open <code>wavelens/viewer.html</code> from the repository (<code>file://</code>, nothing to build) and drop a
-    VCD on it, or press <span class="ui">Open…</span> in the <b>dump</b> group of its bar. Every viewer has that group, a built page too, so
-    you can load another dump into any of them.</li>
+    VCD on it, or take <span class="ui">File ▾ → Open dump…</span> (<kbd>g</kbd> <kbd>O</kbd>) in its bar. Every viewer has it, a built
+    page too, so you can load another dump into any of them.</li>
   <li><b>WaveDrom JSON in your own page.</b> A <code>&lt;script type="application/wavedrom"&gt;</code> block becomes a viewer; see
     <a href="wavedrom.html">WaveDrom</a>.</li>
 </ul>
@@ -121,8 +122,11 @@
     <span class="ui">⟳</span> reads a dump opened in the page again; <span class="ui">Copy image</span> (the range, else the window, as
     PNG to the clipboard) and its ▾ (<span class="ui">Copy image of all rows</span>, <span class="ui">Save image of all rows as SVG</span>, PNG,
     SVG, WaveDrom).</td></tr>
-  <tr><td>compare</td><td>Only while a second dump is compared: <span class="ui">A</span> <span class="ui">B</span>
-    <span class="ui">A+B</span>, ◀ ▶ through the differences (<kbd>[d</kbd> <kbd>]d</kbd>), <span class="ui">≠ N ✕</span>.</td></tr>
+  <tr><td>compare</td><td>Only while a second dump is picked, compared or read: <span class="ui">A</span> <span class="ui">B</span>
+    <span class="ui">A+B</span> (<kbd>d</kbd> <kbd>D</kbd>), <span class="ui">Compare</span> (<kbd>g=</kbd>; there while B is picked or the
+    window moved since the compare), <span class="ui">▒</span> the red mask on or off (<kbd>gb</kbd>), ◀ ▶ through the differences
+    (<kbd>[d</kbd> <kbd>]d</kbd>), <span class="ui">≠ N ✕</span> (B only picked: <span class="ui">B: b.vcd ✕</span>)
+    (<a href="compare.html#window">The window compared</a>).</td></tr>
 </table>
 <p>The filters on the rows sit in the title line: <span class="ui">Highlight: N ✕</span>, <span class="ui">Hidden: N ✕</span>,
   <span class="ui">Only: N modules ‖ ✕</span>, <span class="ui">FSMs … ✕</span> (each ✕ clears its own; when the readout would be cut
@@ -198,6 +202,14 @@
   <tr><td>the start / end of the dump</td><td></td><td><kbd>Home</kbd> / <kbd>End</kbd></td></tr>
   <tr><td>scroll the rows</td><td>the wheel</td><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td></tr>
 </table>
+<p id="scrollbar"><b>The scroll bar.</b> Zoomed in, a thin bar at the foot of the waves stands for all of the waves (with the gaps on
+  the waves: the cut-out axis), its thumb for the window. Drag the thumb and the window follows, its span kept; while it is
+  held, the window's ends stand over it. A click on the track (its lowest few pixels, lit under the pointer) brings the window's
+  middle there and drags on from it; above them the last row takes its clicks as ever. <kbd>l</kbd> goes back to the window
+  before. With all of the waves in the window there is no bar; the setting <code>scrollbar: false</code> takes it away
+  (<code>{"op": "layout", "scrollbar": false}</code> for one viewer, kept in its state).</p>
+<figure><img src="img/viewer-scrollbar.png" alt="The APB waves zoomed to 60–120 ns, the scroll bar's thumb held at the foot of the waves, 60.0 ns … 120.0 ns over it" loading="lazy">
+  <figcaption><b>The thumb held.</b> The window is 60 ns … 120 ns of the whole run; dragged, the waves follow.</figcaption></figure>
 <p>With many rows, <code>"maxHeight": "80vh"</code> makes them scroll inside the viewer; the canvas only covers the rows in view, so
   any number of rows scrolls smoothly. <b>⚙ ▾ → Scroll in the window</b> (a tick) switches on the fly: with the
   page, the rows go by with the browser's scroll bar and the bar sticks to the top of the window, the time axis under it down to the
@@ -251,9 +263,11 @@
   cycle, the Δ of the two cursors is in PCLK cycles.</figcaption></figure>
 
 <h3 id="compare">Compare two runs</h3>
-<p><span class="ui">Compare…</span> in the bar's <b>dump</b> group reads a second run's VCD over these waves: a red band where a signal
-  differs, ≠ on its name, a struck name for a signal the second dump lacks, <kbd>]d</kbd> / <kbd>[d</kbd> to the next / previous
-  difference, <span class="ui">≠ N ✕</span> to stop. On exact waves only. The whole story with pictures:
+<p><span class="ui">File ▾ → Compare with…</span> (<kbd>g</kbd> <kbd>C</kbd>) picks a second run's VCD as B (the bar says
+  <span class="ui">B: b.vcd ✕</span>); <span class="ui">Compare</span> (<kbd>g</kbd> <kbd>=</kbd>) then compares it over the window in
+  sight: a red band where a signal differs, ≠ on its name, a struck name for a signal the second dump lacks, <kbd>]d</kbd> /
+  <kbd>[d</kbd> to the next / previous difference, <span class="ui">≠ N ✕</span> to stop. Zoom or pan and Compare is lit again: the
+  compare stays the one of its window until you press it. On exact waves only. The whole story with pictures:
   <a href="compare.html">Compare two runs</a>.</p>
 
 <h2 id="edges">Edges and values</h2>
@@ -475,11 +489,11 @@
   <span class="ui">Rename this group…</span> gives it a new name, <span class="ui">Delete this group</span> removes it, <span class="ui">Go to</span>
   (or <kbd>ctrl+G</kbd>) opens one, brings it to the middle and selects its first signal. A double-click on a group's name in the names
   (or <kbd>F2</kbd> on it) renames it too, as the <span class="ui">✎</span> of its line in the <kbd>ctrl+G</kbd> list (or <kbd>F2</kbd>
-  there): its name in a small box, <kbd>Enter</kbd> renames, <kbd>Esc</kbd> leaves it.</p>
-<p>Any signal or module of the dump moves the same way among the rows of its module: <kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> on it (a module
-  with its rows; <kbd>alt+shift</kbd>: its module), or <span class="ui">Move up</span> / <span class="ui">Move down</span> in its menu (<span class="ui">Your groups ▸</span>). The
-  order is kept with the view (Save, this browser, undo); another <span class="ui">Sort</span> drops it, said (<kbd>ctrl+Z</kbd> brings it
-  back).</p>
+  there): its name in a small box, <kbd>Enter</kbd> renames, <kbd>Esc</kbd> leaves it. The new name shows at once wherever the group
+  does: its row in the names, the waves, the <kbd>ctrl+G</kbd> list, the menus.</p>
+<figure><img src="img/viewer-group-rename.png" alt="The group handshake at the top of the names, a box under its name: Rename the group “handshake”, handshake (APB) typed, Enter: rename · Esc: cancel" loading="lazy">
+  <figcaption><b>A group renamed in place.</b> A double-click on its name (or <kbd>F2</kbd>): the box under it, the name typed
+  over; <kbd>Enter</kbd> renames.</figcaption></figure>
 <p>The order is yours. <kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> move the selected signal (a selected run of them, as one block) one place in
   its group, or the row of the names with the focus (a group's header: its group);
   <kbd>alt+shift+↑</kbd> / <kbd>alt+shift+↓</kbd> move the whole group among yours. Drag a signal of a group, or a group's header, in
@@ -490,6 +504,29 @@
   <span class="ui">Your groups ▸</span> into one of yours. Each move is one step to <a href="#undo">undo</a>. A drag over the other names selects their text, as before (ctrl+C copies the
   paths). The groups are kept in this browser and the saved state; the command is <code>{"op": "group", "name": "ctl", "signals":
   ["PSEL", "PENABLE"]}</code>, <code>"move": "up"</code> for its place.</p>
+
+<h2 id="order">The order of the rows</h2>
+<p>The rows of the dump take your order too, inside their module; nothing is copied into a group.</p>
+<ul>
+  <li><kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> on a selected signal move it one place past the next row shown (a hidden row is no place);
+    a run of signals selected (shift+click) moves as one block; on a module's row in the names (the focus there) the module moves with
+    its rows. <kbd>alt+shift+↑</kbd> / <kbd>alt+shift+↓</kbd> move the module the signal is in.</li>
+  <li>The right button on such a name: <span class="ui">Your groups ▸</span> has <span class="ui">Move up</span>,
+    <span class="ui">Move down</span>, <span class="ui">To the top of “…”</span> and <span class="ui">To the bottom of “…”</span> its module
+    (the picture of <a href="#find">Select</a> shows them).</li>
+  <li>The toast says the place: <code>PRDATA: 8 of 14 in apb_tb.u_regs</code>. Each move is one step to <kbd>ctrl+Z</kbd>.</li>
+  <li>The order is kept in this browser and in Save: the state's <code>"order"</code>, a module's path (<code>""</code>: the top) and
+    the names of its rows in your order; a second row of one name in a module is kept as <code>valid#2</code>. A row it does not name
+    (a signal new in the dump) keeps its place.</li>
+  <li>It is the order of the sort it was made under: another <span class="ui">Sort</span>, other prefixes, a state of another sort or
+    another <code>groupOrder</code> drop it, said in the toast; <kbd>ctrl+Z</kbd>, or that sort again, brings it back.</li>
+  <li>From a script or an agent: the command <code>{"op": "order", "signal": "apb_tb.u_regs.PRDATA", "move": "up"}</code> (<code>"top"</code>,
+    <code>"bottom"</code>, a place number; <code>"module": true</code> its module; <code>"clear": true</code>). For a page file,
+    <code>tools/viewedit.py --from-page page.html</code> takes the order of a page saved with it into the config.</li>
+</ul>
+<figure><img src="img/viewer-order.png" alt="Only u_regs of the APB example: PRDATA selected, moved two places up with alt+↑, now between PWDATA and PREADY; the toast: PRDATA: 8 of 14 in apb_tb.u_regs" loading="lazy">
+  <figcaption><b><kbd>alt+↑</kbd> twice on PRDATA.</b> It was after <code>PREADY</code> and <code>PSLVERR</code>, as the dump has it, and
+  is before them now; the toast says its place in its module (Only <code>u_regs</code> keeps the picture short).</figcaption></figure>
 
 <h2 id="sort">Sorting</h2>
 <p><span class="ui">Sort</span> (<kbd>s</kbd>) cycles off → A→Z → Z→A. The prefixes in the field next to it (<code>i_,o_</code>) are skipped
@@ -522,6 +559,9 @@
   <li>Pick the arrow's shape (<code>- ~ -~ ~- -| |- -|-</code>: straight, curve, curve late / early, corner, step), head (→ end, ↔ both,
     ← start, none), line (solid, dashed, dotted), colour and label.</li>
 </ol>
+<figure><img src="img/viewer-bookmark-label.png" alt="b on PSEL at 85 ns: a small box Bookmark · PSEL · 85 ns over the waves, SETUP typed as its label; Enter: add · Esc: cancel" loading="lazy">
+  <figcaption><b><kbd>b</kbd>: the label asked on the spot.</b> PSEL selected, the cursor at 85 ns; the box names the signal and
+  the time, <kbd>Enter</kbd> adds the bookmark with its label.</figcaption></figure>
 <figure><img src="img/viewer-notes.png" alt="The bookmark list (number, time, cursor, signal, Δ, lift, colour, label, text) and the arrow list" loading="lazy">
   <figcaption><b>The lists.</b> Six bookmarks of the APB example with their Δ from the cursor and their texts; three arrows, two of them
   steps (<code>-|-</code>) and one a curve.</figcaption></figure>
@@ -619,6 +659,7 @@
 </ul>
 
 <h2 id="keys">All the keys</h2>
+<p>By topic, with the boxes, the menus, the bar, your own keys, another layout and VS Code: <a href="keys.html">Keys, menus and the bar</a>.</p>
 <p id="key-menu"><b>The box of what can follow.</b> A moment after the first key of a sequence (<kbd>g</kbd>, <kbd>z</kbd>, <kbd>y</kbd>, <kbd>[</kbd>, <kbd>]</kbd>) a box under the mouse pointer lists what can
   follow, as LazyVim does (where the window ends it opens on the pointer's left or above it; before the mouse has moved on the page, in the
   bottom right corner). Press the key or click it; it waits as long as it is open, <kbd>Esc</kbd> or a click elsewhere closes it, and so does a key it does not list (that key does nothing then; another first key starts its own box). <kbd>g</kbd> is the menu of nearly everything: going to things, the
@@ -683,13 +724,18 @@
   <tr><td><kbd>?</kbd></td><td>the keys box</td><td>hover a control</td><td>what it does, its keys</td></tr>
   <tr><td><kbd>d</kbd> / <kbd>D</kbd></td><td>a dump compared: the other run / both over each other; <kbd>gb</kbd>: the red mask off / on (<a href="compare.html#flip">Compare</a>)</td>
     <td><kbd>B</kbd></td><td>the selected bus bit by bit</td></tr>
+  <tr><td><kbd>gC</kbd>, <kbd>g=</kbd></td><td>pick a second dump as B (<span class="ui">Compare with…</span>); compare A and B over the window in
+    sight (<span class="ui">Compare</span>, <a href="compare.html#window">the window compared</a>)</td><td><kbd>gu</kbd></td><td>the runs kept
+    of the dump (VS Code: the Runs panel, <a href="runs.html">Runs</a>)</td></tr>
+  <tr><td><kbd>]r</kbd> <kbd>[r</kbd></td><td>pick the next (older) / previous run kept as B (<kbd>g=</kbd> compares it)</td>
+    <td><kbd>]w</kbd> <kbd>[w</kbd></td><td>open the next / previous run's waves here, nothing compared</td></tr>
   <tr><td><kbd>T</kbd></td><td>the state machines panel (<a href="types.html">Types</a>)</td><td><kbd>c</kbd></td><td>zoom in on the cursor</td></tr>
   <tr><td><kbd>G</kbd></td><td>the last signal</td><td><kbd>N</kbd></td><td>the previous match</td></tr>
 </table>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.62 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

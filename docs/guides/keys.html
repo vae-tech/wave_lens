@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keys, menus and the bar · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html" aria-current="page">Keys</a>
+  <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Keys, menus and the bar</h1>
+<p class="lead">Everything the viewer does is on a key, in a menu or on the bar, usually all three. The keys are those of Questa's
+  wave window for moving in time and vim's for the rest; a box after the first key of a pair says what can follow, so nothing has
+  to be learnt by heart. This guide is the map: where the keys go, the boxes, the right button's menu, the bar, your own keys,
+  another keyboard layout, VS Code, and the table of them all.</p></header>
+
+<h2 id="focus">Where the keys go</h2>
+<ul>
+  <li>The keys work on the <b>waves</b>: a click on them gives them the keys (the cursor goes there too). The names, the bar's buttons and
+    the panels have keys of their own while they have the focus (a list's <kbd>↑</kbd> <kbd>↓</kbd>, a menu's <kbd>Enter</kbd>).</li>
+  <li>A <b>field</b> keeps what you type: the find, the cursor's time, a bookmark's label, a form. <kbd>Esc</kbd> in the find goes
+    back to the waves.</li>
+  <li><kbd>Esc</kbd> anywhere in the viewer (but a bookmark's fields) resets: no search, no highlight, no selected signal; the window,
+    the opened modules and the scroll stay.</li>
+  <li>Of the <kbd>ctrl</kbd> keys the viewer takes <kbd>ctrl+F</kbd> (find), <kbd>ctrl+C</kbd> (the selected path; nothing selected: the
+    browser's copy), <kbd>ctrl+G</kbd> (your groups), <kbd>ctrl+Z</kbd> <kbd>ctrl+shift+Z</kbd> <kbd>ctrl+Y</kbd> (undo, redo); every
+    other — <kbd>ctrl+S</kbd>, <kbd>ctrl+P</kbd>, <kbd>ctrl+T</kbd> … — stays the browser's. Of the <kbd>alt</kbd> keys:
+    <kbd>alt+↑</kbd> <kbd>alt+↓</kbd> (a row up or down) and, in the find field, <kbd>alt+C</kbd> <kbd>alt+W</kbd> <kbd>alt+R</kbd>.</li>
+</ul>
+
+<h2 id="hints">The box of what can follow</h2>
+<p>Five keys start a pair: <kbd>g</kbd> (a menu of nearly everything), <kbd>z</kbd> (folding), <kbd>y</kbd> (copying), <kbd>]</kbd>
+  (next) and <kbd>[</kbd> (previous). Type the pair quickly and it just works. Wait a moment after the first key (200 ms, the setting
+  <code>keyHints</code>; <code>false</code>: never) and a box opens under the mouse pointer with what can follow: press the key, or
+  click it.</p>
+<ul>
+  <li>The box waits as long as it is open; <kbd>Esc</kbd> or a click elsewhere closes it and does nothing else.</li>
+  <li>A key it does not list does nothing (the toast says <i>no such sequence</i>); another first key starts its own box.</li>
+  <li>It lists only what this page can do now: <kbd>]d</kbd> with a dump compared, <kbd>]r</kbd> <kbd>]w</kbd> in VS Code, the plugins'
+    pairs (bus transactions, expressions, assertions) when they are there, your own keys under <i>Your keys</i>.</li>
+  <li>Where the window ends it opens left of the pointer or above it; before the mouse has moved on the page, in the bottom right
+    corner.</li>
+</ul>
+<figure><img src="img/viewer-keys.png" alt="The box after g: go to, markers and bookmarks, the state, the dump, more" loading="lazy">
+  <figcaption><b>After <kbd>g</kbd>.</b> Each line is a key to press or a line to click.</figcaption></figure>
+<div class="pair">
+  <figure><img src="img/keys-z.png" alt="The box after z: R open every module, M fold every module, o c a the selected signal's module" loading="lazy">
+    <figcaption><b>After <kbd>z</kbd>.</b> The modules; <kbd>zz</kbd> too when there is a range.</figcaption></figure>
+  <figure><img src="img/keys-bracket.png" alt="The box after ]: bookmark, marker, edge, bus transaction, match of the expression, expression, assertion failure, assertion" loading="lazy">
+    <figcaption><b>After <kbd>]</kbd>.</b> The APB example's: its bus decoder, expressions and assertions add theirs.</figcaption></figure>
+</div>
+
+<h2 id="g">The g menu</h2>
+<table>
+  <tr><th>Key</th><th>What</th><th>Key</th><th>What</th></tr>
+  <tr><td colspan="4"><b>Go to</b></td></tr>
+  <tr><td><kbd>gg</kbd></td><td>the first signal</td><td><kbd>gl</kbd></td><td>your groups… (a list; <kbd>ctrl+G</kbd> too)</td></tr>
+  <tr><td><kbd>gt</kbd></td><td>the modules… (the Modules panel)</td><td><kbd>gT</kbd></td><td>the state machines…</td></tr>
+  <tr><td colspan="4"><b>Markers and bookmarks</b></td></tr>
+  <tr><td><kbd>gm</kbd></td><td>the list of them…</td><td><kbd>gM</kbd> / <kbd>gB</kbd></td><td>a marker / a bookmark at the cursor</td></tr>
+  <tr><td><kbd>gd</kbd></td><td>show or hide the Δ between markers</td><td><kbd>gc</kbd></td><td>clear them all</td></tr>
+  <tr><td colspan="4"><b>The state</b> (your view as a file)</td></tr>
+  <tr><td><kbd>gs</kbd> / <kbd>gL</kbd></td><td>save… / load…</td><td><kbd>gr</kbd></td><td>reload the state loaded last</td></tr>
+  <tr><td colspan="4"><b>The dump</b></td></tr>
+  <tr><td><kbd>gO</kbd> / <kbd>gR</kbd></td><td>open… / reload</td><td><kbd>gC</kbd></td><td>compare… (pick a dump as B)</td></tr>
+  <tr><td><kbd>g=</kbd></td><td>compare A and B over the window in sight</td><td><kbd>gb</kbd></td><td>the red mask over the differences off / on</td></tr>
+  <tr><td><kbd>gu</kbd></td><td>the runs kept… (VS Code: <a href="runs.html">Runs</a>)</td><td></td><td></td></tr>
+  <tr><td colspan="4"><b>More</b></td></tr>
+  <tr><td><kbd>gv</kbd></td><td>the gaps cut out of the waves, or continuous time again</td><td><kbd>gp</kbd></td><td>save the page</td></tr>
+</table>
+<p>Plugins add theirs under <i>Plugins</i> (<kbd>gx</kbd>: the list of expressions).</p>
+
+<h2 id="pairs">z, y, ] and [</h2>
+<table>
+  <tr><th>Key</th><th>What</th><th>Key</th><th>What</th></tr>
+  <tr><td><kbd>zR</kbd> / <kbd>zM</kbd></td><td>open / fold every module</td><td><kbd>zo</kbd> <kbd>zc</kbd> <kbd>za</kbd></td>
+    <td>open / fold / either the selected signal's module</td></tr>
+  <tr><td><kbd>zz</kbd></td><td>zoom to the range (else the two cursors)</td><td></td><td></td></tr>
+  <tr><td><kbd>yy</kbd></td><td>the selected signal's path</td><td><kbd>yn</kbd></td><td>its name</td></tr>
+  <tr><td><kbd>yt</kbd></td><td>the time of the cursor</td><td><kbd>yl</kbd></td><td>a link to here (the cursor, the signal)</td></tr>
+  <tr><td><kbd>yi</kbd></td><td>an image of the range (else the window)</td><td><kbd>yI</kbd></td><td>an image of all rows</td></tr>
+  <tr><td><kbd>]b</kbd> <kbd>[b</kbd></td><td>next / previous bookmark</td><td><kbd>]m</kbd> <kbd>[m</kbd></td><td>marker</td></tr>
+  <tr><td><kbd>]e</kbd> <kbd>[e</kbd></td><td>edge of the selected signal</td><td><kbd>]d</kbd> <kbd>[d</kbd></td><td>difference of a compare</td></tr>
+  <tr><td><kbd>]r</kbd> <kbd>[r</kbd></td><td>run kept, picked as B (VS Code)</td><td><kbd>]w</kbd> <kbd>[w</kbd></td><td>run kept shown as A (VS Code)</td></tr>
+  <tr><td><kbd>]t</kbd> <kbd>[t</kbd></td><td>bus transaction</td><td><kbd>]x</kbd> <kbd>[x</kbd>, <kbd>]X</kbd> <kbd>[X</kbd></td>
+    <td>match of the expression, expression</td></tr>
+  <tr><td><kbd>]f</kbd> <kbd>[f</kbd></td><td>assertion failure</td><td><kbd>]a</kbd> <kbd>[a</kbd></td><td>assertion</td></tr>
+</table>
+
+<h2 id="menu">The right button's menu</h2>
+<p>The right button over the waves does what <kbd>ctrl</kbd>+drag does — a drag measures a range, a click takes none — then opens a
+  menu of what is there: the range, a marker or a span under the pointer, the row, the moment, the picture. Over a name
+  it is the row's menu. The <kbd>Menu</kbd> key (<kbd>shift+F10</kbd>) opens it at the cursor, on the selected row.</p>
+<p>The blocks, from the top:</p>
+<table>
+  <tr><th>Block</th><th>What is in it</th></tr>
+  <tr><td>the range (when there is one)</td><td><span class="ui">Zoom to the range</span>, <span class="ui">Range ▸</span> (Bookmarks at its
+    ends, Copy Δ, Keep as span…; in VS Code Keep as a slice (Runs), Save as FST…), <span class="ui">Clear the range</span></td></tr>
+  <tr><td>a marker or a span under the pointer</td><td>a marker: Its text…, its colour, Delete the marker; a span: As range, Delete the
+    span</td></tr>
+  <tr><td>the row</td><td>Colour, Radix, <span class="ui">Show as ▸</span> (analog, bits, type), Highlight, Duplicate, Hide, Copy the path,
+    Assertions on this signal, <span class="ui">Your groups ▸</span></td></tr>
+  <tr><td>the moment</td><td><span class="ui">Here ▸</span>: a bookmark or a marker here, Copy A · B · Δ, Copy link to here, Markers…</td></tr>
+  <tr><td>the picture</td><td><span class="ui">Copy image</span> (<kbd>yi</kbd>), <span class="ui">Export ▸</span> (PNG, SVG, all rows as SVG,
+    WaveDrom, a piece of waves as WaveLens JSON)</td></tr>
+  <tr><td>the rest</td><td><span class="ui">Gaps ▸</span>, <span class="ui">Cycles ▸</span>, <span class="ui">Modules ▸</span> (Rows ▸ on waves
+    without modules)</td></tr>
+</table>
+<figure><img src="img/keys-menu-range.png" alt="The right button's menu over PADDR with a range, Range ▸ open: Bookmarks at its ends, Copy Δ, Keep as span…" loading="lazy">
+  <figcaption><b>Range ▸.</b> On a page in a browser; the VS Code tab adds <i>the range alone, its times from 0</i>: Keep as a slice
+  (Runs) and Save as FST… (<a href="runs.html#slices">Runs</a>).</figcaption></figure>
+<p>In the menu: <kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd> through the items, <kbd>→</kbd> or <kbd>Enter</kbd> open a submenu,
+  <kbd>←</kbd> or <kbd>Esc</kbd> close it, <kbd>Esc</kbd> again closes the menu. The pointer opens a submenu at once, another after a short
+  rest on its header. A click of the left button while the right one is down puts a marker there at once (<code>M1</code>,
+  <code>M2</code> …) instead of the menu. Every item and submenu: <a href="viewer.html#menu">the viewer guide</a>.
+  <code>"contextMenu": false</code> leaves the right button to the browser.</p>
+
+<h2 id="bar">The bar</h2>
+<p>The bar's groups are on three lines: time (cursor, view, edges, marks, go to), find (find, expression, SVA), and the rows (list,
+  signal, file, compare); <a href="viewer.html#bar">the viewer guide</a> has each group. Hover any control for what it does and its keys.
+  Two menus hold what is not used every minute:</p>
+<ul>
+  <li><span class="ui">File ▾</span>: Open dump…, Compare with…, Sources…, Runs… (VS Code), Save view…, Load view…, Reload view, Forget the
+    kept view…, Save page, Load assertions… — each with its <kbd>g</kbd> key.</li>
+  <li><span class="ui">⚙ ▾</span> (the right button anywhere on the bar opens it too): Theme ▸ (on a page without a theme button of its
+    own), Scroll in the window, Edge style, Sort prefixes, Snap to edges, Strip over the axis, Tools in the bar ▸ (a tick per group),
+    Short form ▸, Arrange the bar…, Reset the bar.</li>
+</ul>
+<div class="pair">
+  <figure><img src="img/viewer-bar-file.png" alt="File ▾ open" loading="lazy">
+    <figcaption><b>File ▾.</b> Each with its key.</figcaption></figure>
+  <figure><img src="img/viewer-bar-tools.png" alt="⚙ ▾ with Tools in the bar open" loading="lazy">
+    <figcaption><b>⚙ ▾, Tools in the bar.</b> A tick per group.</figcaption></figure>
+</div>
+<p><b>The short form.</b> A bar narrower than 900 px (a side tab of VS Code; always with <code>toolsCompact: true</code>) drops the group
+  labels and puts the rarer controls of each group behind its <span class="ui">⋯</span>. <span class="ui">▴</span> folds the tools into the
+  title line, <span class="ui">▾ tools</span> opens them again.</p>
+<figure><img src="img/viewer-bar-compact.png" alt="The bar in its short form, the find's ⋯ open" loading="lazy">
+  <figcaption><b>The short form.</b> The find's ⋯ open under it.</figcaption></figure>
+
+<h2 id="arrange">Arranging the bar</h2>
+<p><span class="ui">⚙ ▾ → Arrange the bar…</span>: drag a group by its label to another place, another line, a new line or the strip over
+  the time axis; <kbd>Esc</kbd> during a drag puts it back. Without the mouse, <span class="ui">Keys…</span> lists the groups:
+  <kbd>alt+↑</kbd> <kbd>alt+↓</kbd> move the one in focus within its line, <kbd>alt+←</kbd> <kbd>alt+→</kbd> to the line before or after,
+  <kbd>Space</kbd> shows or hides it. <span class="ui">Done</span> or <kbd>Esc</kbd> ends. The arrangement is kept in this browser for every
+  viewer (in VS Code: every tab); <a href="viewer.html#arrange">the viewer guide</a> has the rest.</p>
+<figure><img src="img/viewer-arrange.png" alt="The bar in the arranging mode, a group dragged" loading="lazy">
+  <figcaption><b>Arranging.</b> A group dragged by its label; the accent bar shows where it lands.</figcaption></figure>
+
+<h2 id="mine">Your own keys</h2>
+<p>The setting <code>keys</code> maps a key you type to one the viewer has (in the global config, a config file's <code>"config"</code>, an
+  element's <code>data-keys</code> as JSON; the layers merge key by key):</p>
+<pre>"keys": {"gx": "gm", "M": "m", "ctrl+k": "ctrl+g", "m": null}</pre>
+<p><kbd>g</kbd> <kbd>x</kbd> opens the markers' list, <kbd>M</kbd> puts a marker, <kbd>ctrl+K</kbd> lists your groups, <kbd>m</kbd> does
+  nothing. A key of yours is one key, a pair after <kbd>g</kbd> <kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd>, or a <code>ctrl+</code>
+  key; <kbd>Esc</kbd>, <kbd>?</kbd> and the five first keys stay the viewer's. The boxes and <kbd>?</kbd> list yours under <i>Your
+  keys</i>; an entry the viewer cannot take is said in the log.</p>
+
+<h2 id="layout">Another keyboard layout</h2>
+<p>The keys work by their place on the keyboard, as on a US layout: on a Russian one <kbd>ш</kbd> zooms in as <kbd>i</kbd> does,
+  <kbd>х</kbd> <kbd>а</kbd> is <kbd>[f</kbd>, the key of <kbd>/</kbd> finds. Latin letters, digits and signs typed as such are taken as
+  they are; the fields take what you type.</p>
+
+<h2 id="vscode">In VS Code</h2>
+<p>The tab's keys are the viewer's and do not reach VS Code: the plain ones, and the <kbd>ctrl</kbd> / <kbd>alt</kbd> ones above, which mean
+  in the tab what they mean in VS Code (find, copy, undo). <code>wavelens.keysToVSCode</code> (default <code>["ctrl+G"]</code>, Go to Line)
+  are left to VS Code; the list of your groups is <kbd>gl</kbd> then. The others — <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd>,
+  <kbd>ctrl+shift+</kbd>… (but <kbd>ctrl+shift+Z</kbd>, redo) — are VS Code's.</p>
+
+<h2 id="all">All the keys</h2>
+<p>The box of <kbd>?</kbd> (or <span class="ui">?</span> at the right of the title line) has them all, the plugins' too:</p>
+<figure><img src="img/viewer-help.png" alt="The keys and mouse box" loading="lazy">
+  <figcaption><b>The keys box.</b> Grouped as the tables below.</figcaption></figure>
+<h3 id="t-zoom">Zoom and move</h3>
+<table>
+  <tr><td><kbd>i</kbd> <kbd>+</kbd> / <kbd>o</kbd> <kbd>-</kbd></td><td>zoom in / out</td></tr>
+  <tr><td><kbd>f</kbd></td><td>show everything</td></tr>
+  <tr><td><kbd>l</kbd></td><td>the window before the last zoom</td></tr>
+  <tr><td><kbd>c</kbd></td><td>zoom in on the cursor</td></tr>
+  <tr><td><kbd>ctrl+wheel</kbd>, pinch</td><td>zoom at the pointer</td></tr>
+  <tr><td>wheel</td><td>scroll the rows</td></tr>
+  <tr><td><kbd>shift+wheel</kbd>, drag, <kbd>←</kbd> <kbd>→</kbd></td><td>pan</td></tr>
+  <tr><td><kbd>shift+drag</kbd>, middle drag</td><td>zoom into a range</td></tr>
+  <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>the start / end</td></tr>
+  <tr><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>a page of rows</td></tr>
+  <tr><td>the bar under the waves</td><td>zoomed in: all of the waves, the window its thumb: drag it, click its track</td></tr>
+</table>
+<h3 id="t-cursor">Cursor and edges</h3>
+<table>
+  <tr><td>click</td><td>cursor on a near edge (<kbd>alt</kbd>: not) + select the signal</td></tr>
+  <tr><td><kbd>shift+←</kbd> <kbd>shift+→</kbd></td><td>move the cursor</td></tr>
+  <tr><td><kbd>Tab</kbd> / <kbd>shift+Tab</kbd>, <kbd>]e</kbd> / <kbd>[e</kbd></td><td>next / previous edge (Tab with no signal selected: the focus moves on)</td></tr>
+  <tr><td><kbd>e</kbd></td><td>edge kind</td></tr>
+</table>
+<h3 id="t-signals">Signals</h3>
+<table>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd>, <kbd>j</kbd> <kbd>k</kbd></td><td>select the previous / next</td></tr>
+  <tr><td><kbd>shift+click</kbd> a name</td><td>select every signal from the last clicked one</td></tr>
+  <tr><td><kbd>gg</kbd> / <kbd>G</kbd></td><td>the first / last</td></tr>
+  <tr><td><kbd>ctrl+G</kbd>, <kbd>gl</kbd></td><td>your groups: a list, a click goes there, ✎ or <kbd>F2</kbd> renames</td></tr>
+  <tr><td><kbd>gv</kbd></td><td>the waves with the gaps cut out, or in continuous time</td></tr>
+  <tr><td><kbd>alt+↑</kbd> <kbd>alt+↓</kbd></td><td>the selected signal up / down in your group or its module (<kbd>shift</kbd>: the group, the module)</td></tr>
+  <tr><td><kbd>ctrl+click</kbd>, ○</td><td>highlight</td></tr>
+  <tr><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row from the last one to it</td></tr>
+  <tr><td><kbd>zM</kbd> / <kbd>zR</kbd></td><td>fold / open every module</td></tr>
+  <tr><td><kbd>t</kbd></td><td>the modules as a tree (<a href="modules.html">Modules</a>)</td></tr>
+  <tr><td><kbd>T</kbd></td><td>the state machines in the tree of their modules</td></tr>
+  <tr><td><kbd>zc</kbd> <kbd>zo</kbd> <kbd>za</kbd></td><td>the selected signal's module</td></tr>
+  <tr><td><kbd>B</kbd>, click <code>[7:0]</code></td><td>the selected bus bit by bit (again: folded)</td></tr>
+  <tr><td><kbd>s</kbd></td><td>sort</td></tr>
+  <tr><td><kbd>yy</kbd>, <kbd>ctrl+C</kbd></td><td>copy the path</td></tr>
+  <tr><td><kbd>yi</kbd> / <kbd>yI</kbd></td><td>copy an image of the range (else the window): its rows / all rows</td></tr>
+  <tr><td><kbd>zz</kbd></td><td>zoom to the range (else the two cursors)</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>reset: search, highlight, selection</td></tr>
+</table>
+<h3 id="t-find">Find</h3>
+<table>
+  <tr><td><kbd>/</kbd>, <kbd>ctrl+F</kbd></td><td>find (the bar scrolled away: it floats over the waves)</td></tr>
+  <tr><td><kbd>alt+C</kbd> <kbd>alt+W</kbd> <kbd>alt+R</kbd></td><td>in the field: match case, full match, regular expression</td></tr>
+  <tr><td><kbd>n</kbd> <kbd>N</kbd>, <kbd>Enter</kbd></td><td>next / previous match</td></tr>
+  <tr><td><kbd>*</kbd> <kbd>#</kbd></td><td>find the selected name: its next / previous match</td></tr>
+  <tr><td><kbd>/</kbd> in the Assertions panel</td><td>find assertions: <code>name*</code> <code>@signal</code> <code>in:scope</code> <code>is:fail</code> (<a href="sva.html">Assertions</a>)</td></tr>
+</table>
+<h3 id="t-measure">Measure and mark</h3>
+<table>
+  <tr><td><kbd>shift+click</kbd> the waves</td><td>a second cursor: Δ to the cursor, in cycles of the clock</td></tr>
+  <tr><td><kbd>x</kbd></td><td>swap the cursors</td></tr>
+  <tr><td><code>c147</code> in the cursor field</td><td>cycle 147 of the clock</td></tr>
+  <tr><td><kbd>]d</kbd> <kbd>[d</kbd>, <kbd>d</kbd>, <kbd>D</kbd>, <kbd>gb</kbd></td><td>a dump compared: next / previous difference, the other run, both
+    over each other, the red mask (<a href="compare.html">Compare</a>)</td></tr>
+  <tr><td><kbd>g=</kbd></td><td>compare A and B over the window in sight; zoomed since: again</td></tr>
+  <tr><td><kbd>gu</kbd>, <kbd>]r</kbd> <kbd>[r</kbd>, <kbd>]w</kbd> <kbd>[w</kbd></td><td>the runs kept (VS Code): the panel, B the next / previous run,
+    A the next / previous run shown (<a href="runs.html">Runs</a>)</td></tr>
+  <tr><td><kbd>1</kbd> … <kbd>9</kbd></td><td>go to bookmark 1 … 9</td></tr>
+  <tr><td><kbd>ctrl+drag</kbd> (<kbd>ctrl+click</kbd>: clear)</td><td>measure a range: Δ, the edges or changes of that signal</td></tr>
+  <tr><td><kbd>alt+drag</kbd></td><td>a box: its time and its signals, then the menu</td></tr>
+  <tr><td>right button</td><td>a range and the menu</td></tr>
+  <tr><td><kbd>b</kbd>, <kbd>]b</kbd> <kbd>[b</kbd></td><td>a bookmark at the cursor (its label asked); next / previous</td></tr>
+  <tr><td><kbd>m</kbd>, <kbd>]m</kbd> <kbd>[m</kbd></td><td>a marker at the cursor (its label asked); next / previous</td></tr>
+  <tr><td>right button + click</td><td>a marker there at once (<code>M1</code>, <code>M2</code> …)</td></tr>
+  <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td></tr>
+  <tr><td>drag a bookmark / a marker's text / a Δ</td><td>move it; <kbd>shift</kbd>+drag a bookmark: an arrow to another one</td></tr>
+</table>
+<h3 id="t-bar">The bar, menus, undo</h3>
+<table>
+  <tr><td><kbd>r</kbd> / <kbd>R</kbd></td><td>the last state loaded, read again (Reload) / the dump read again from the disk, the view kept (⟳)</td></tr>
+  <tr><td><kbd>g</kbd> <kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the box of what can follow</td></tr>
+  <tr><td><kbd>t</kbd> <kbd>T</kbd>, <kbd>gm</kbd> <kbd>gl</kbd></td><td>the panels of the modules, the state machines; the lists of the marks, your groups</td></tr>
+  <tr><td>right button, <kbd>Menu</kbd></td><td>the menu of what is there</td></tr>
+  <tr><td><kbd>ctrl+Z</kbd> / <kbd>ctrl+shift+Z</kbd>, <kbd>ctrl+Y</kbd></td><td>undo / redo</td></tr>
+  <tr><td><kbd>?</kbd></td><td>the keys box</td></tr>
+</table>
+<p>The plugins' keys: <kbd>]t</kbd> <kbd>[t</kbd> (<a href="buses.html">bus transactions</a>), <kbd>]x</kbd> <kbd>[x</kbd> <kbd>]X</kbd>
+  <kbd>[X</kbd> <kbd>gx</kbd> (<a href="sva.html#expressions">expressions</a>), <kbd>]f</kbd> <kbd>[f</kbd> <kbd>]a</kbd> <kbd>[a</kbd>
+  (<a href="sva.html">assertions</a>).</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

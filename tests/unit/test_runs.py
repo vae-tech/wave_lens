@@ -352,6 +352,70 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
 '''
 
 
+# The runs' directory moved under a tab, its edges, a file's Compare stopped, a lazy VCD compared by its FST (review 2026-11-18
+# V-01, V-03, V-04, V-07, T-04): the extension over the fake's settings at three levels and its config-change event; the CLI is
+# a wrapper (args.log: every call; the file "slow": a file's sva diff sleeps instead)
+DIRS = r'''
+const fs = require('fs'), path = require('path'), os = require('os');
+const [F, ext, dir, dump, dump2] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+let wsf;
+const h = F.host({ ext, dir, config: { sva: path.join(dir, 'sva'), lazy: 'always' }, vscode: { ProgressLocation: { Notification: 15 } },
+  window: { withProgress: async (o, f) => f(), showWarningMessage: async () => 'Remove', showOpenDialog: async () => [h.Uri.file(dump2)] },
+  workspace: { getWorkspaceFolder: () => wsf } });
+process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); process.exit(3); });
+F.run(async () => {
+  const A = await h.tab(dump), tab = h.api.tabs()[0], out = {};
+  let n = 100; const ask = async m => { const id = ++n; await A.send(Object.assign({ id }, m)); return A.reply(id); };
+  const runs = m => ask(Object.assign({ type: 'runs' }, m)), args = () => fs.readFileSync(path.join(dir, 'args.log'), 'utf8').trim().split('\n');
+  const cfg = h.vscode.workspace.getConfiguration('wavelens');
+  out.source = (await ask({ type: 'source' })).lazy;   // a large dump: its FST made (lazy 'always')
+  out.kept = (await runs({ op: 'keep', name: 'old' })).run.id;
+  const oldDir = (await runs({ op: 'list' })).dir;
+  out.open = (await runs({ op: 'open', run: 1, dir: oldDir })).name;
+  // V-04: Compare… with a file over the lazy dump: A is the FST the tab reads, not the VCD text
+  fs.writeFileSync(path.join(dir, 'args.log'), '');
+  await runs({ op: 'open', run: 0 });
+  out.fileNow = (await ask({ type: 'compare', signals: ['tb.cnt'], from: 0, to: 40000, path: dump2, of: 0 })).result ? 'result' : 'none';
+  out.diffA = (args().find(l => l.startsWith('diff ')) || '').split(' ')[1];
+  await runs({ op: 'open', run: 1, dir: oldDir });
+  // V-01: the directory moved (another tab's ★, the setting edited) while this tab shows #1 of the old one
+  const said0 = A.said.length, other = path.join(dir, 'other');
+  await cfg.update('runsDir', other, 1);
+  out.told = A.said.slice(said0).filter(m => m.type === 'runs-changed').length;
+  fs.writeFileSync(dump, process.env.BROKEN);
+  out.keptNew = (await runs({ op: 'keep', name: 'new' })).run.id;   // #1 of the new directory: another run
+  fs.writeFileSync(path.join(dir, 'args.log'), '');
+  const f = await ask({ type: 'compare', signals: ['tb.ok'], from: 0, to: 40000, path: dump2, of: 1 });
+  out.fileA = (args().find(l => l.startsWith('diff ')) || '').split(' ')[1];
+  out.fileDiffer = f.result ? f.result.differ : f.error;
+  out.stale = await runs({ op: 'compare', run: 0, signals: ['tb.ok'], from: 0, to: 40000, dir: oldDir });
+  out.staleOpen = await runs({ op: 'open', run: 1, dir: oldDir });
+  out.aGone = await runs({ op: 'compare', run: 0, against: 1, signals: ['tb.ok'], from: 0, to: 40000 });
+  out.list = (await runs({ op: 'list' })).dir;
+  // V-07: ~, ${workspaceFolder}; a workspace folder's own value is the one in effect, the ★ clears it there
+  await cfg.update('runsDir', '~/wl-runs', 1); out.home = tab.runsDir();
+  wsf = { uri: h.Uri.file(path.join(dir, 'ws')) };
+  await cfg.update('runsDir', '${workspaceFolder}/r', 1); out.ws = tab.runsDir();
+  await cfg.update('runsDir', undefined, 1);
+  h.levels[3].runsDir = 'fold';
+  out.folderOf = (await runs({ op: 'list' })).dirOf;
+  const un = await runs({ op: 'dir', keep: false }); out.unFolder = [un.dirOf, h.updates[h.updates.length - 1]];
+  wsf = undefined;
+  // V-07: Compare…'s pick needs no A: a run gone asked as A is no error before the dialog
+  out.pick = await ask({ type: 'compare', pick: true, of: 9 });
+  // V-03: a file's Compare is one at a time — a newer one stops the older; runs cancel stops it
+  await runs({ op: 'open', run: 0 }); fs.writeFileSync(path.join(dir, 'slow'), '');
+  const c1 = ask({ type: 'compare', signals: ['tb.ok'], from: 0, to: 40000, path: dump2, of: 0 });
+  await new Promise(r => setTimeout(r, 300));
+  const c2 = ask({ type: 'compare', signals: ['tb.ok'], from: 0, to: 40000, path: dump2, of: 0 });
+  await new Promise(r => setTimeout(r, 300));
+  await runs({ op: 'cancel' });
+  out.piled = [(await c1).error, (await c2).error];
+  return out;
+});
+'''
+
+
 def result(r):
     """The RESULT line of the EXT script, or why there is none: its exit, stderr and the end of its stdout (T-03 of the run pick)."""
     line = next((x for x in r.stdout.splitlines() if x.startswith('RESULT')), None)
@@ -469,6 +533,39 @@ class VsCode(unittest.TestCase):
                                                          ['runsDir', '.wavelens-runs', 2]), 'in a workspace folder: its settings, relative to it')
             self.assertEqual((o['wsUnstar']['dirOf'], o['wsUnset'][1:]), ({'set': '', 'scope': ''}, [None, 2]))
 
+    def test_the_runs_directory_moved_and_its_edges(self):
+        """Review 2026-11-18 V-01, V-03, V-04, V-07 (T-04: the fake's settings at three levels, its config-change event): the
+        directory moved under a tab that shows a run — every tab told, a file's Compare still of the run shown (its file), the
+        ids of the directory before refused, never another run of the same number; ~ and ${workspaceFolder}; a workspace
+        folder's value said and cleared there; Compare…'s pick with no A; a file's Compare stopped by a newer one and by runs
+        cancel; a lazy VCD compared by its FST."""
+        with H.tmp() as d:
+            p = H.vcd(d, body(), HEAD, name='waves.vcd')
+            q = H.vcd(d, body(25), HEAD, name='broken.vcd')
+            w = os.path.join(d, 'sva')
+            with open(w, 'w', encoding='utf-8') as f:
+                f.write('#!/bin/sh\nd=$(dirname "$0")\necho "$*" >> "$d/args.log"\n'
+                        'if [ "$1" = diff ] && [ -f "$d/slow" ]; then exec sleep 3; fi\nexec "$WAVELENS_REAL" "$@"\n')
+            os.chmod(w, 0o755)
+            env = dict(os.environ, WAVELENS_REAL=SVA, BROKEN=HEAD + body(25))
+            r = subprocess.run([NODE, '-e', DIRS, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, q], capture_output=True, text=True,
+                               timeout=90, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = result(r)
+            old = os.path.join(d, '.wavelens-runs')
+            self.assertTrue(o['source'] and o['diffA'].startswith(os.path.join(d, 'fst', '')) and o['diffA'].endswith('.fst'), ('V-04: A the tab\'s FST', o['diffA']))
+            self.assertEqual(o['told'], 1, 'the setting changed: the tab told (runs-changed)')
+            self.assertEqual((o['fileA'], o['fileDiffer']), (os.path.join(old, '1-waves.fst'), 1),
+                             'the directory moved: A is still the file of the run shown, not #1 of the new directory')
+            for k in ('stale', 'staleOpen'):
+                self.assertIn('directory moved', o[k].get('error', ''), (k, o[k]))
+            self.assertIn('is a run of', o['aGone'].get('error', ''), o['aGone'])
+            self.assertEqual(o['list'], os.path.join(d, 'other'))
+            self.assertEqual((o['home'], o['ws']), (os.path.join(os.path.expanduser('~'), 'wl-runs'), os.path.join(d, 'ws', 'r')), 'V-07: ~ and ${workspaceFolder}')
+            self.assertEqual(o['folderOf'], {'set': 'fold', 'scope': 'folder'}, 'a workspace folder\'s value: said as its')
+            self.assertEqual(o['unFolder'], [{'set': '', 'scope': ''}, ['runsDir', None, 3]], 'the ★ clears it where it is (the folder\'s)')
+            self.assertEqual((o['pick'].get('path'), o['pick'].get('name'), o['pick'].get('error')), (q, 'broken.vcd', None), ('the pick needs no A (a run gone)', o['pick']))
+            self.assertEqual(o['piled'], ['compare: stopped', 'compare: stopped'], 'a newer Compare stops the older; runs cancel the last')
     def test_a_run_compared_by_its_test_case(self):
         with H.tmp() as d:
             (early, _), (later, _) = cases(), cases(10)

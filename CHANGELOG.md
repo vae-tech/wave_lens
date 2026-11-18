@@ -5,6 +5,101 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.63 — 18 November 2026
+
+Finding assertions: a search in the Assertions panel by name, signal, instance and state, the waves masked to what
+it finds; three new guides (Runs, Large dumps in VS Code, Keys); the review of 2026-11-18 fixed: a compare carries its
+A and its window, the runs' directory moved under a tab, the engine's list cut while it runs, your order per namesake.
+
+- Finding assertions (asked 2026-11-18): the field ⌕ in the Assertions panel's head finds them by label (`apb_*`), by signal
+  (`@PREADY`, `@*.u_apb.p*`: its name in the source or the full path it was bound to, no read of the dump), by instance
+  (`in:*.u_dma*`) and by state (`is:fail pass vacuous cover assert assume unbound error capped running`), `a,b` either, `!x`
+  not; the list, its Table and Failures show the matches (`3 of 14 match`), a word not understood is said under the field,
+  results still missing say "still evaluating". **Mask** draws only the matches on the waves (over `svaShow`, a static SVG
+  too); `]a [a` and Enter walk them; `/` in the panel, Esc; the right button on a signal: **Assertions on this signal**.
+  Kept in this browser and in the saved state (`svaFilter`), the setting `svaFilter`, the command `sva {filter, mask}`
+  (the matches; `tools/viewedit.py` writes it into a page, `view_edit` of the MCP); `svaShow` takes the same words as one text.
+- New guides (review 2026-11-18): **Runs: keep, browse, compare, slice** (`docs/guides/runs.html`, N-01) — its pictures
+  made by `tests/guide_shots.py` in a faked VS Code tab whose host is the real `sva runs` (`Tab`, `--only runs`);
+  **Large dumps in VS Code** (`docs/guides/large.html`, N-02) — a 24 MB dump of a 100 MHz clock generated there, read
+  by the window with the real `sva vcd --codes` and `sva eval` (`--only large`); **Keys, menus and the bar**
+  (`docs/guides/keys.html`, N-03: the boxes after `z` and `]`, the menu's Range ▸, `--only keys`; viewer.html links to it,
+  its own keys section not yet shortened). The three in every guide's top line.
+
+- Your order of the rows (review 2026-11-18): a row's key is its name, the second of one name in a module `"valid#2"` —
+  namesakes no longer torn apart or stuck (B-04, A-03; a 0.62 state with a name twice reads the second so); the command
+  `order` moves a row of the dump, `sort` answers `orderDropped` (M-05); the order is of its sort: another sort,
+  prefixes, a state of another sort with no order, another `groupOrder` drop it, said, and that sort again brings it
+  back, kept in this browser meanwhile (B-21, B-22); `viewedit.py --from-page` takes the order (M-04).
+- The scroll bar under the waves: on the screen when the viewer's own box goes on under it (B-18); the thumb's place
+  maps the window's start onto the track left for it, flush right only at the end (B-19); the strip lets the last row
+  have its clicks, the right button and the wheel, the track is its lowest 4 px (B-20); `layout` with `scrollbar`, kept
+  in the state (M-07).
+- Commands: `compare {off, mask}` keeps the mask; `view_get` says the mask and the scroll bar off (M-07); a rename of no
+  group, a rename or a label that is an object refused; `viewedit.py set_state` keeps the runs' mode and window, the run
+  shown and the order as the page does (M-08).
+- Tests: the scroll bar's click at the track's middle and end, the strip, the scroll, the least thumb, `pointercancel`,
+  the gaps, its own box, its setting from a config (T-01, T-07, T-08); `yi yI zz` (T-05); the moves' branches and a
+  twin of the page and `viewedit.py` (T-09); three self-comparing checks of the Runs list (T-11); `nap` scales the waits
+  for nothing to happen by `SMOKE_TIME_SCALE` (T-12).
+- Docs: alt+↑ ↓ any row (D-09), a state's keys (D-11), **File ▾** and **⚙ ▾** for the old groups (D-08), the methods
+  `moveOwn`, `renameGroup`, `setScrollbar`, `compareMask`, `compareOff`, `runsPickA/B`, the scroll bar in the help (D-16).
+
+Review of 2026-11-18, the compare, the Runs panel and the VS Code extension:
+
+- A compare carries what it is of (A-01): the window asked (B-01: Compare no longer lit right after a compare of a window
+  the host rounds or B does not cover), its A (B-02: a saved compare of another A not drawn; a given one dropped by ⟳,
+  said), whether it can be made again (M-02: a compare given whole lights no Compare, and Compare says why).
+- The picks are one object (A-02): the later B wins, file or run (B-08); a failed compare keeps the pick (B-03); a failed
+  open of A leaves no compare for the next ⟳ and A picked (B-09); a click on a B only picked keeps the compare (B-11); the
+  run compared picked as A says there is no B (B-12); `]r [r` step past the A picked (B-13); the bar says `A: … ✕` with only
+  A picked, ⟳ keeps A picked, a span of a state in a page without a host is not compared over, a state's Open mode says
+  the compare it dropped, `d` `D` `]d` `gb` name Compare when B is picked (B-23).
+- The page's `compare()` of a large dump reads A's rows exact over the window first (B-14).
+- VS Code: the runs' directory moved under a tab — the tab drops its run compared, picks and Δ, shows now; the host keeps A
+  the file shown and refuses ids of the directory before (V-01); a spawn that throws gives its slot back (V-02); a file's
+  Compare is one at a time and stopped by ✕ (V-03); a lazy VCD compared by its FST, a large VCD as B made an FST (V-04); a
+  read stopped before it is queued never starts (V-05); evaluations leave a slot to the reads (V-06); `runsDir` takes `~`,
+  `${workspaceFolder}`, a workspace folder's value (said and cleared there), Compare…'s pick needs no A (V-07).
+- MCP / API: `view_get` and `compare` answer the window compared, `from` `to` (and `asked`) (M-01); `compare {go, from?,
+  to?}` (the bar's Compare), `compare {dump, from, to}` over a window, `off` drops the picks, `result` leaves none (M-03);
+  `view_get full`: a compare's `first`, `shift`, `asked` and stretches in ns (M-06).
+- Tests: T-02, T-03 (`compare {pick}` in test_protocol), T-04 (the fake's settings at three levels, its config event, a tab
+  closed), T-10, T-11; docs D-01 … D-07, D-10, D-14, D-15.
+
+Review of 2026-11-18, the assertions engine, the CLI and the bus plugin:
+
+- B-05 (review 2026-11-18): `sva eval --max-attempts N` cuts while the dump is evaluated (`Options.max_listed`): a failure on
+  every cycle of 5 M holds 20 000 traces, not 5 M (4.8 s and 550 MB, was 15 s and 4.9 GB); `listed.first_fail`.
+- B-06: `sva diff --results` of a cut list compares up to its last listed start, said on a line (`compared_to`, `partial`).
+- B-10: the report of a cut list: no latency, the first failure of all, "Failures (N of M listed)", JUnit says so.
+- B-07: a large dump's window asked is narrowed to `SVA.cli.passes` cycles: its passes are not cut, a pan inside it shows
+  them all; one cut all the same is asked again past its last listed start.
+- B-15: results dropped by an edit while a window is asked are not put back; an edit after Bind drops the old results.
+- B-16: a window whose evaluation failed is asked again after `SVA.cli.retry` (10 s).
+- B-17: the bus decoder of a large dump reads its ports one by one: one that cannot be read leaves the others decoded.
+- D-12, D-13, D-17: `sva --help` (`--max-attempts`, the cut of `sva fst`, `runs keep`'s flags), `--large-bytes`, `--tag`,
+  `results.schema.json`'s attempts and lane.
+- T-06: tests of the 11-13 fixes B-05, B-06, B-17, B-20, B-21, B-23, B-24, B-26.
+
+Review of 2026-11-18, the guides and the docs:
+
+- G-02: the guides' pictures made again (47: the panel head with its search field, the bar's prefixes group, the scroll
+  bar, the compare group, the help box, the menu's Assertions on this signal, the gaps' bookmark lane).
+- G-03: `make guide-shots-check` (not in make check): the guides' pictures made again into BUILD/guide-img and compared
+  with docs/guides/img; `tests/pngdiff.py --skip` (a picture made by hand), `--made` (ONLY=), `--how`.
+- G-06: `pages-head.png`'s "Generated" time and version frozen by `tests/guide_shots.py`.
+- G-07 … G-12: viewer.html (File ▾ → Compare with…, the compare group, the scroll bar, the keys table), compare.html
+  (File ▾, the bar), vscode.html (Linux and Windows hosts, a large dump: a short section; no CLI: 256 MB at most),
+  sva.html (`--no-pass`, `--max-attempts`, `--cycle-runs`, `--json`, `--no-lane`, `listed`; the 500 failures listed).
+- N-06: compare.html "The window compared" (compare-picked, compare-window, compare-nomask); viewer.html "The order of
+  the rows" (viewer-order), the scroll bar (viewer-scrollbar), the bookmark's label box, a group renamed; sva.html "A
+  large dump" (sva-large: a faked VS Code host, sva eval of the whole dump and of the window in sight); compare.html's
+  runs and vscode.html's large dump in short, linking to runs.html and large.html.
+- D-16, D-18: USAGE the Runs list's `a` and `k`, `view_get`'s `order`, `expr_markers` `goto` `bus_list` only in a page;
+  DEVELOPMENT.md `resdiff.rs`; commands.html `compare {mask, go, off}`, `order`, the page-only list; the hints that
+  named "Compare… in the bar" say File ▾ → Compare with… (the page, `viewedit.py`).
+
 ## 0.62 — 18 November 2026
 
 A compare is asked for: picking A and B does nothing, Compare compares them over the window in sight; the red mask on and
@@ -36,7 +131,7 @@ pictures of selected rows with their lanes, a bookmark's label asked, your group
   compared (↑ ↓ open the row they stop on); kept with the view (`runsMode`). A run's **comment** is first on its second
   line, in the text's colour, what the run is after it, muted (it was cut off at the end); a name that is only the dump's
   muted; each **tag** a colour of its own; A / B clearer at rest. A slice's **↔** (`s`): the waves shown open on the
-  slice's start and end, the range set to it (Slice ▸ keeps the same piece of these waves at once; a slice shown as A:
+  slice's start and end, the range set to it (Range ▸ Keep as a slice keeps the same piece of these waves at once; a slice shown as A:
   its time mapped). The runs' **directory** at the panel's foot, selectable, **Copy**; **★** makes it the setting
   `wavelens.runsDir` (the workspace's, else the user's; clicked again: cleared).
 - **Copy image** (Export) of the selected or highlighted rows: the Δ arrows on a signal's line, the markers' texts and

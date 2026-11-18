@@ -237,9 +237,24 @@ const COLL = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { numeri
 const stripPfx = (name, pfx) => { const p = pfx.find(p => name.startsWith(p) && name.length > p.length); return p ? [p, name.slice(p.length)] : ['', name]; };
 // rows in display order: siblings (one group level, between {} spacers) sorted by name; groups move as a block;
 // groupOrder: 'first' / 'last' = inside every group the sub-groups (modules) come before / after the signals; 'file' = as given
-// own: your order (alt+↑ ↓ in the names; the state's "order"): a module's path ('' the top) -> the names of its rows in your order.
-// The places of the rows it names (in each run between spacers, after the sort) are filled again in its order; a row it does
-// not name (a signal new in the dump) keeps its place
+// own: your order (alt+↑ ↓ in the names; the state's "order"): a module's path ('' the top) -> the keys of its rows in your order
+// (ownKeys: the name; a second row of that name in the module "valid#2"). The places of the rows it names (in each run between
+// spacers, after the sort) are filled again in its order; a row it does not name (a signal new in the dump) keeps its place
+// a row's key in your order (A-03): its name among its siblings (one module, the file's order); the second and later of one
+// name (two "valid" of a WaveJSON group, a signal and a module "sub") "valid#2", "valid#3" -> Map(row -> key)
+function ownKeys(rows) {
+  const n = new Map(), out = new Map();
+  for (const r of rows) { if (r.type === 'space') continue;
+    const k = (r.anc.length ? r.anc[r.anc.length - 1] : '') + '\u0000' + r.name, i = (n.get(k) || 0) + 1; n.set(k, i);
+    out.set(r, i === 1 ? r.name : `${r.name}#${i}`); }
+  return out;
+}
+// a list of your order as read: 0.62's plain names (one name twice: the second is "name#2") as the keys
+function ownList(L) {
+  const set = new Set(L), seen = new Map();
+  return L.map(n => { const i = (seen.get(n) || 0) + 1; seen.set(n, i); const k = `${n}#${i}`;
+    return i > 1 && !set.has(k) ? k : n; });
+}
 function orderRows(rows, dir, pfx, groupOrder, own = null) {
   const sorting = dir === 'asc' || dir === 'desc', gs = groupOrder === 'first' ? -1 : groupOrder === 'last' ? 1 : 0;
   const mine = own && Object.keys(own).length ? own : null;
@@ -250,10 +265,11 @@ function orderRows(rows, dir, pfx, groupOrder, own = null) {
   const c = (x, y) => (COLL ? COLL.compare(x, y) : x < y ? -1 : x > y ? 1 : 0);
   const byName = (a, b) => sgn * (c(key(a), key(b)) || c(a.name, b.name));   // i_data / o_data: full name breaks the tie
   const cmp = (a, b) => gs * ((a.type === 'group') - (b.type === 'group')) || (sorting ? byName(a, b) : 0);   // stable sort
+  const keys = mine ? ownKeys(rows) : null, key2 = r => keys.get(r);
   const yours = (run, path) => {
-    const L = mine && Array.isArray(mine[path]) ? mine[path] : null; if (!L) return run;
+    const L = mine && Array.isArray(mine[path]) ? ownList(mine[path]) : null; if (!L) return run;
     const at = new Map(); L.forEach((n, i) => { if (!at.has(n)) at.set(n, i); });
-    const k = run.map((r, i) => (at.has(r.name) ? i : -1)).filter(i => i >= 0), put = k.map(i => run[i]).sort((a, b) => at.get(a.name) - at.get(b.name));
+    const k = run.map((r, i) => (at.has(key2(r)) ? i : -1)).filter(i => i >= 0), put = k.map(i => run[i]).sort((a, b) => at.get(key2(a)) - at.get(key2(b)));
     k.forEach((i, j) => { run[i] = put[j]; }); return run;
   };
   const out = [];
@@ -266,7 +282,7 @@ function orderRows(rows, dir, pfx, groupOrder, own = null) {
   emit(kids.get(null), '');
   return out;
 }
-// your order as the state keeps it: a module's path -> its rows' names (strings), a list of none left out
+// your order as the state keeps it: a module's path -> its rows' keys (strings, ownKeys), a list of none left out
 const ownOrder = o => Object.fromEntries(Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {})
   .filter(([, l]) => Array.isArray(l) && l.length).map(([p, l]) => [p, l.map(String)]));
 

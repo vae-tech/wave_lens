@@ -17,7 +17,8 @@ wavelens/                     what a page needs, nothing else
                               host is VS Code's), log.js (the log under the viewer), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js
-  sva.js, sva.wasm.js         assertions and expressions in the page: their panels, binding, evaluation, marks; the engine (generated, make sva-build)
+  sva.js, sva.wasm.js         assertions and expressions in the page: their panels, binding, evaluation, marks, the search of the assertions
+                              (svaQuery; its twin of the errors: viewedit.py sva_query_errors); the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 vscode/                       the VS Code extension (a workspace extension: Remote-SSH / WSL host): extension.js (the
                               custom editor of .vcd / .fst, FST -> VCD by the bundled sva (and Convert to FST: sva
@@ -84,7 +85,8 @@ work/                         your dumps and their configs: configs tracked, dum
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly); the CLI's sva vcd (cli/src/vcd.rs:
                               a dump as VCD text, a cut of it), sva fst (cli/src/fst.rs: a VCD as an FST, as vcd2fst
                               writes it), sva diff (cli/src/diff.rs: two dumps streamed and merged by time) and sva runs
-                              (cli/src/runs.rs: the runs kept of a dump, .wavelens-runs/runs.json, diff over a window)
+                              (cli/src/runs.rs: the runs kept of a dump, .wavelens-runs/runs.json, diff over a window);
+                              sva diff --results (cli/src/resdiff.rs: two runs' assertion results, new / gone / moved)
 prompts/                      the roadmap as a series of prompts (on dev only)
 bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static), windows-x86_64/sva.exe (mingw-w64)
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
@@ -116,6 +118,7 @@ make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list: 
 make shots                  # tests/shots.py: docs/img/*.png, dark theme, and tests/visual/*.png (--set visual: white, 420 px, an FSM's details, a scale of 2) (after make examples; ~20 s, see below)
 make shots-check            # both into BUILD/img and BUILD/visual, compared with the committed ones by tests/pngdiff.py: a picture that changed (more than 48 pixels by more than 32 of 255 from the pixel there and the 8 around it: text a pixel off is the same) or one made and not committed fails, its difference in BUILD/*/diff
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
+make guide-shots-check      # the same into BUILD/guide-img, compared with docs/guides/img by tests/pngdiff.py (vscode-fsm.png made by hand: skipped; ONLY=: those guides' only); not in make check
 make vsix                   # tools/mkvsix.py: BUILD/wavelens.vsix, its copy wavelens-<version>.vsix (the extension, the viewer, the static sva); make check builds it
 make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavelens/sva.wasm.js
@@ -226,16 +229,25 @@ signals (`codes`, optionally a window: `from to lod keep`, numbered `rid`) alway
 (`CODES_PROCS`, the rest in turn); `codes-stop` takes one out of the queue or kills its CLI (answered `stopped`); `spawnRun`
 never throws in `close` (an output too large for a string is `big`). `sva` (`svaEval`): assertions over the dump's FST by
 `sva eval --cycle-runs --no-lane --resolve scope` (the page's files written to a temporary directory, each under its
-name; `passes` false: `--no-pass`, `max`, `from`/`to`), stopped by `codes-stop` as a read, in turn with them (`codesQ`, two CLIs of a tab at once); `stopAll` on `dispose` and on
+name; `passes` false: `--no-pass`, `max`, `from`/`to`), stopped by `codes-stop` as a read (a job registered by its `rid` before the
+first await; its slot given back on `started`, also when the spawn threw), in turn with them (`codesQ`, two CLIs of a tab at
+once, the evaluations in one of them, the reads first: `codesNext`); `stopAll` on `dispose` and on
 a `page` (a page made again numbers its reads from 1); on the page `evaluateCli`
 (sva.js: a bound row over `lazyWhole`, `opts.evalSva` given) and `Panel.winWant` / `winRead` (the passes of a window,
-limits in `SVA.cli`). On the
+narrowed to `SVA.cli.passes` cycles so that its list is not cut; `winHas`: a window holds a view; a failed one asked again
+after `SVA.cli.retry`; limits in `SVA.cli`). On the
 page the run shown is `runsShown` (A), the run compared is the compare's own (`cmp.result.run`, the getter `runCur`: B);
 a step of A (`runsShow`, `openDump(keep)`) takes the view's time as it is and its rows from a snapshot taken on now and on
 each run that had every row of it (`runsKeep`), so a run without a row does not lose it for the next one: the snapshot is
 the view of now with the part of the snapshot before that names the rows these waves lack merged in (`runsMerge`), so an
 edit made meanwhile is kept. The page owns A: every runs message that acts on the waves shown (`compare`, `diff`, `keep`
-with a window, `cut`, Compare…) names it (`against` / `of`); the extension's `Tab.shown` is for its log and `list` only. A slice
+with a window, `cut`, Compare…) names it (`against` / `of`); the extension's `Tab.shown` (its file and directory) is for its
+log and `list`, and is the file of A when the runs' directory moved under the tab (`recordOf`); the messages that name runs
+by their ids carry the directory the page listed (`dir`), refused when it is another. A compare carries what it is of
+(`diff.js`): `cmp.a` (A's id), `cmp.asked` (the window Compare asked: `cmpStale` tests it, not the time the result
+covers), and `cmpRedo()` says how it is made again (a run, a file's path, a dump read here; none: a result given whole);
+the picks are one object, `cmpPicked()` `{a, b}` (`b` a run `{run}` or a file `{file}`), read and written as `runPickA`,
+`runPickB`, `cmpPick`; `runsGoAfter` lives over one open only (`runsGo`). A slice
 (`runs keep` with `from`, `to`: `sva runs keep --from --to`, the cut of `vcd.rs` with `Cut::zero` written as an FST by
 `fst::write_cut_fst`) starts at 0; its `slice.from` is `runOrigin` (`origin` in `runs.rs`): a slice and a whole one compare
 at the slice's place (`--offset`, the page result's `shift`), two slices from 0; a step of A between a slice and a whole

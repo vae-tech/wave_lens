@@ -285,6 +285,14 @@ class Dump(unittest.TestCase):
         self.assertEqual((r['results'][0]['name'], r['results'][0]['compared'], r['results'][0]['differ']), ('cmpb.vcd', 2, 1), r)
         g = json.loads(W.call('view_get', {'page': page, 'rows': ''})[0])
         self.assertEqual((g['compare']['differ'], g['compare']['missing']), (1, 0), g)
+        self.assertEqual((g['compare']['from'], g['compare']['to']), (r['results'][0]['from'], r['results'][0]['to']), 'the window compared, in ns (M-01)')
+        # review 2026-11-18 M-01, M-03: a compare over a window says its window — differ 0 there is not "the runs are equal"
+        first = g['compare']['first']
+        w = json.loads(W.call('view_edit', {'page': page, 'ops': [{'op': 'compare', 'dump': b, 'from': first + 1, 'to': first + 2}]})[0])['results'][0]
+        g2 = json.loads(W.call('view_get', {'page': page})[0])['compare']
+        self.assertEqual((w['from'], w['to'], g2['from'], g2['to'], g2['asked']), (first + 1, first + 2, first + 1, first + 2, {'from': first + 1, 'to': first + 2}),
+                         (w, g2))
+        W.call('view_edit', {'page': page, 'ops': [{'op': 'compare', 'dump': b}]})
         self.assertIn(['err', 1, '≠'], g['rows']['rows'])
         r = json.loads(W.call('view_edit', {'page': page, 'ops': [{'op': 'compare', 'off': True}]})[0])
         self.assertNotIn('compare', json.loads(W.call('view_get', {'page': page})[0]))
@@ -699,11 +707,15 @@ class Views(unittest.TestCase):
         """B-51: view_get full gives the window of the runs (runsOver) and the compare's from / to in ns as the other times;
         set_state takes them back in ns."""
         st = {'wavelens': 'state', 'cursor': 30000, 'runsOver': {'label': 'w', 'from': 10000, 'to': 50000},
-              'compare': {'name': 'B', 'from': 0, 'to': 80000, 'signals': {}}}
+              'compare': {'name': 'B', 'from': 0, 'to': 80000, 'first': 55000, 'shift': -10000, 'asked': {'from': 0, 'to': 80000},
+                          'signals': {'tb.a': {'spans': [[55000, 60000]]}}}}
         out = W.state_ns(st)
         self.assertEqual((out['cursor'], out['runsOver'], out['compare']['from'], out['compare']['to']), (30, {'label': 'w', 'from': 10, 'to': 50}, 0, 80))
+        # review 2026-11-18 M-06: the compare's other times in ns too, none in ps among them
+        self.assertEqual((out['compare']['first'], out['compare']['shift'], out['compare']['asked'], out['compare']['signals']['tb.a']['spans']),
+                         (55, -10, {'from': 0, 'to': 80}, [[55, 60]]))
         back = W.state_ps(out)
-        self.assertEqual((back['runsOver'], back['compare']['from'], back['compare']['to']), (st['runsOver'], 0, 80000))
+        self.assertEqual((back['runsOver'], back['compare']), (st['runsOver'], st['compare']))
 
     def test_state_times_both_ways(self):
         """M5: a state the agent read (view_get full: ns) and gives back (set_state) is in ns too: the same times again."""

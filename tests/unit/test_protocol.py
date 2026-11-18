@@ -26,7 +26,7 @@ const h = F.host({ ext, dir, workspaceState: new Map(),
   config: { sva: process.env.WAVELENS_SVA, lazy: mode === 'fsm' ? 'never' : 'always' },
   vscode: { ProgressLocation: { Notification: 15 }, env: { clipboard: { writeText: async t => { clip = t; } } } },
   window: { withProgress: async (o, f) => f(), showWarningMessage: async () => 'Remove', showErrorMessage: async () => undefined,
-    showSaveDialog: async () => h.Uri.file(saved), showOpenDialog: async () => [h.Uri.file(dialog)] },
+    showSaveDialog: async () => h.Uri.file(saved), showOpenDialog: async () => (dialog ? [h.Uri.file(dialog)] : undefined) },
   workspace: { getWorkspaceFolder: () => undefined, fs: { writeFile: async (u, d) => fs.writeFileSync(u.fsPath, d) } } });
 let n = 0;
 F.run(async () => {
@@ -84,6 +84,10 @@ F.run(async () => {
         ok: spec.reply ? !!r && !r.error && P.answers(m, r) : !r, error: r && r.error });
     }
   }
+  // Compare…'s pick (review 2026-11-18 T-03): the dialog only, its path and name; the dialog closed: an empty answer; a run
+  // that is gone asked as A: no error (the pick needs none)
+  dialog = other; out.pick = await ask({ type: 'compare', pick: true, of: 0 }); out.pickGone = await ask({ type: 'compare', pick: true, of: 9 });
+  dialog = null; out.pickClosed = await ask({ type: 'compare', pick: true, of: 0 });
   // none of the table: an error answered (to a request with an id), nothing thrown
   out.bad = [];
   for (const m of [{ type: 'nope' }, { type: 'codes' }, { type: 'runs', op: 'zap' }, { type: 'runs', op: 'rm' }, { type: 'store', key: 'k' },
@@ -164,7 +168,11 @@ class Walk(unittest.TestCase):
         self.assertFalse(bad, 'answered as the table says (an answer where it names one, none where not)')
         self.assertEqual({w['type'] for w in walked}, set(table()['page']), 'every type of the table walked')
         self.assertEqual((o['clip'], o['saved']), ('PSEL', True))
-        errs = [(m, r and r.get('error')) for m, r in o['bad']]
+        pick = lambda r: {k: x for k, x in r.items() if k != 'id'}
+        self.assertEqual(pick(o['pick']), {'path': os.path.join(d, 'other.vcd'), 'name': 'other.vcd'}, 'compare pick: the dialog\'s file, nothing compared')
+        self.assertEqual(pick(o['pickGone']), pick(o['pick']), 'compare pick with A a run gone: the pick needs no A (review 2026-11-18 V-07)')
+        self.assertEqual(pick(o['pickClosed']), {}, 'the dialog closed: an empty answer')
+        errs =[(m, r and r.get('error')) for m, r in o['bad']]
         self.assertTrue(all(e for _, e in errs), f'a message none of the table\'s: an error answered {errs}')
         self.assertEqual([e for _, e in errs][:6], ['no message nope', 'codes: without codes', 'runs: no operation zap', 'runs rm: without run',
                                                    'store: without value', 'runs compare: without from, to'])

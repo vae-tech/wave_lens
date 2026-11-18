@@ -147,12 +147,13 @@ fn assertion(o: &Value, doc: &Value, row: usize, source: &str) -> Value {
         }
     }
     // a partial list (sva eval --no-pass, --max-attempts: a large dump): the facts of all the attempts it carries in
-    // "listed" instead of the ones of the list; no latency without the passes (review 2026-11-13 B-15)
+    // "listed" instead of the ones of the list; no latency without the passes nor of a cut list's passes (reviews
+    // 2026-11-13 B-15, 2026-11-18 B-10)
     let listed = o.get("listed");
     if let Some(l) = listed.and_then(|l| l.get("longest")).and_then(Value::as_array) {
         longest = Some((l.first().and_then(Value::as_u64).unwrap_or(0), l.get(1).and_then(Value::as_u64).unwrap_or(0)));
     }
-    if listed.is_some_and(|l| l.get("passes") == Some(&json!(false))) {
+    if listed.is_some_and(|l| l.get("passes") == Some(&json!(false)) || l.get("of").is_some_and(|x| !x.is_null())) {
         lat.clear();
     }
     let latency = (!lat.is_empty()).then(|| {
@@ -162,18 +163,23 @@ fn assertion(o: &Value, doc: &Value, row: usize, source: &str) -> Value {
     });
     let stats = o.get("stats").cloned().unwrap_or(json!({}));
     let ev = |a: &&Value| event(o, a, &cycles, unit, row, source);
-    json!({
+    let cut = listed.and_then(|l| l.get("of")).is_some_and(|x| !x.is_null());
+    let mut out = json!({
         "row": row, "source": source, "name": s(o, "name"), "kind": s(o, "kind"), "scope": s(o, "scope"), "file": s(o, "file"), "line": u(o, "line"), "text": s(o, "text"),
         "unit": unit, "stats": stats,
-        "first_fail": fails.first().map(ev),
-        "last_fail": listed.and_then(|l| l.get("last_fail")).map(|a| ev(&a)).or_else(|| fails.last().map(ev)),
+        "first_fail": listed.and_then(|l| l.get("first_fail")).filter(|a| !a.is_null()).map(|a| ev(&a)).or_else(|| fails.first().map(ev)),
+        "last_fail": listed.and_then(|l| l.get("last_fail")).filter(|a| !a.is_null()).map(|a| ev(&a)).or_else(|| fails.last().map(ev)),
         "longest": longest.map(|(l, st)| json!({ "cycles": l, "start": st, "time": cycles.get(st as usize).map(|t| time_text(*t, unit)) })),
         "latency": latency,
         "covered": if cover { json!(stats.get("matches").and_then(Value::as_u64).unwrap_or(u(&stats, "pass"))) } else { Value::Null },
         "missing": o.get("missing").cloned().unwrap_or(json!([])),
         "notes": o.get("notes").cloned().unwrap_or(json!([])),
         "failures": fails.iter().map(ev).collect::<Vec<_>>(),
-    })
+    });
+    if cut && !cover {   // the failures its results list: a cut list may list fewer than stats.fail
+        out["fails_listed"] = json!(fails.len());
+    }
+    out
 }
 
 /// `{"meta", "results": [...]}` -> `{"meta", "totals", "assertions": [row], "failures": [event by failure time],
@@ -294,6 +300,41 @@ fn listed(r: &Value) -> (Vec<&Value>, Vec<(usize, usize)>) {
     let more = n.into_iter().filter(|(_, k)| max > 0 && *k > max).map(|(row, k)| (row, k - max)).collect();
     (out, more)
 }
+/// The failures of all the assertions, and how many of them the results list (a cut list lists fewer).
+fn fail_counts(r: &Value) -> (u64, u64) {
+    let rows = r["assertions"].as_array().into_iter().flatten().filter(|a| s(a, "kind") != "cover");
+    rows.fold((0, 0), |(all, listed), a| {
+        let f = u(&a["stats"], "fail");
+        (all + f, listed + a.get("fails_listed").and_then(Value::as_u64).unwrap_or(f).min(f))
+    })
+}
+/// The lines after the failure list: per assertion, the failures not shown — past `max_failures`, and the ones its
+/// results do not list (a cut list: sva eval --max-attempts).
+fn more_lines(r: &Value) -> Vec<(usize, String)> {
+    let rows = r["assertions"].as_array().cloned().unwrap_or_default();
+    let (_, more) = listed(r);
+    let past: std::collections::BTreeMap<usize, usize> = more.into_iter().collect();
+    let mut out = Vec::new();
+    for (k, a) in rows.iter().enumerate() {
+        let f = u(&a["stats"], "fail") as usize;
+        let l = a.get("fails_listed").and_then(Value::as_u64).map_or(f, |x| (x as usize).min(f));
+        let p = past.get(&k).copied().unwrap_or(0);
+        if s(a, "kind") == "cover" || (p == 0 && l == f) {
+            continue;
+        }
+        out.push((k, if l == f {
+            format!("{p} more failures of NAME (report.json lists every one)")
+        } else {
+            format!("{} more failures of NAME (its results list {l} of {f}: the list was cut, sva eval --max-attempts)", p + f - l)
+        }));
+    }
+    out
+}
+fn failures_head(r: &Value) -> String {
+    let (all, listed) = fail_counts(r);
+    let shown = r["failures"].as_array().map_or(0, Vec::len) as u64;
+    if all > listed { format!("Failures ({shown} of {all} listed)") } else { format!("Failures ({shown})") }
+}
 /// Notes of the assertions (thread limit, values cut to 64 bits, short columns): (row, note).
 fn notes(r: &Value) -> Vec<(usize, String)> {
     r["assertions"].as_array().into_iter().flatten().enumerate()
@@ -330,20 +371,19 @@ pub fn markdown(r: &Value) -> String {
             let _ = writeln!(o, "- {} {}: {}", code(s(&rows[*k], "name")), md(s(&rows[*k], "scope")), md(n));
         }
     }
-    let total = r["failures"].as_array().map_or(0, Vec::len);
-    let (list, more) = listed(r);
-    let _ = writeln!(o, "\n## Failures ({total})\n");
+    let (list, _) = listed(r);
+    let _ = writeln!(o, "\n## {}\n", failures_head(r));
     if list.is_empty() {
-        o.push_str("None.\n");
+        o.push_str(if fail_counts(r).0 > 0 { "None listed.\n" } else { "None.\n" });
     } else {
         let _ = writeln!(o, "| # | Assertion | Scope |{} Failed at | Start | Reason | Note |\n|--:|---|---|{}---|---|---|---|", if src { " Source |" } else { "" }, if src { "---|" } else { "" });
         for (i, e) in list.iter().enumerate() {
             let _ = writeln!(o, "| {} | {} | {} |{} {} (cycle {}) | {} (cycle {}) | {} | {} |", i + 1, code(s(e, "name")), md(s(e, "scope")), if src { format!(" {} |", md(s(e, "source"))) } else { String::new() },
                 s(e, "time_fail"), u(e, "failed_at"), s(e, "time"), u(e, "start"), md(s(e, "kind")), md(s(e, "note")));
         }
-        for (row, m) in more {
-            let _ = writeln!(o, "\n… and {m} more failures of {} (report.json lists every one)", code(s(&rows[row], "name")));
-        }
+    }
+    for (row, m) in more_lines(r) {
+        let _ = writeln!(o, "\n… and {}", m.replace("NAME", &code(s(&rows[row], "name"))));
     }
     o
 }
@@ -388,14 +428,17 @@ pub fn junit(r: &Value) -> String {
             o.push_str("<skipped message=\"cover never hit\"/>");
         } else if failing(a) {
             let first = &a["first_fail"];
-            let _ = write!(o, "<failure type=\"{}\" message=\"{} fail of {} attempts; first at {}: {}\">", xml(s(first, "kind")), u(st, "fail"), u(st, "attempts"),
-                xml(s(first, "time_fail")), xml(s(first, "note")));
+            let at = if first.is_null() { "none listed".to_string() } else { format!("first at {}: {}", s(first, "time_fail"), s(first, "note")) };
+            let _ = write!(o, "<failure type=\"{}\" message=\"{} fail of {} attempts; {}\">", xml(s(first, "kind")), u(st, "fail"), u(st, "attempts"), xml(&at));
             let list = &by_row[k];
-            for e in list.iter().take(if max == 0 { usize::MAX } else { max }) {
+            let shown = list.len().min(if max == 0 { usize::MAX } else { max });
+            for e in &list[..shown] {
                 let _ = writeln!(o, "{} (cycle {}), started {} (cycle {}): {}", xml(s(e, "time_fail")), u(e, "failed_at"), xml(s(e, "time")), u(e, "start"), xml(s(e, "note")));
             }
-            if max > 0 && list.len() > max {
-                let _ = writeln!(o, "… and {} more", list.len() - max);
+            let all = (u(st, "fail") as usize).max(list.len());
+            if all > shown {
+                let cut = if all > list.len() { format!(" (the results list {} of {all})", list.len()) } else { String::new() };
+                let _ = writeln!(o, "… and {} more{cut}", all - shown);
             }
             o.push_str("</failure>");
         } else if u(st, "capped") > 0 {
@@ -443,11 +486,10 @@ pub fn html(r: &Value) -> String {
     if !ns.is_empty() {
         let _ = writeln!(o, "<ul class=\"notes\">{}</ul>", ns.iter().map(|(k, n)| format!("<li><code>{}</code> {}: {}</li>", xml(s(&rows[*k], "name")), xml(s(&rows[*k], "scope")), xml(n))).collect::<String>());
     }
-    let total = r["failures"].as_array().map_or(0, Vec::len);
-    let (list, more) = listed(r);
-    let _ = writeln!(o, "<h3>Failures ({total})</h3>");
+    let (list, _) = listed(r);
+    let _ = writeln!(o, "<h3>{}</h3>", failures_head(r));
     if list.is_empty() {
-        o.push_str("<p>None.</p>\n");
+        o.push_str(if fail_counts(r).0 > 0 { "<p>None listed.</p>\n" } else { "<p>None.</p>\n" });
     } else {
         let _ = writeln!(o, "<table class=\"fails\"><thead><tr><th>#</th><th>Assertion</th><th>Scope</th>{}<th>Failed at</th><th>Start</th><th>Reason</th><th>Note</th></tr></thead><tbody>", if src { "<th>Source</th>" } else { "" });
         for (i, e) in list.iter().enumerate() {
@@ -455,9 +497,10 @@ pub fn html(r: &Value) -> String {
                 xml(s(e, "scope")), if src { format!("<td>{}</td>", xml(s(e, "source"))) } else { String::new() }, xml(s(e, "time_fail")), u(e, "failed_at"), xml(s(e, "time")), u(e, "start"), xml(s(e, "kind")), xml(s(e, "note")));
         }
         o.push_str("</tbody></table>\n");
-        for (row, m) in more {
-            let _ = writeln!(o, "<p class=\"more\">… and {m} more failures of <code>{}</code> (report.json lists every one)</p>", xml(s(&rows[row], "name")));
-        }
+    }
+    for (row, m) in more_lines(r) {
+        let (a, b) = m.split_once("NAME").unwrap_or((&m, ""));
+        let _ = writeln!(o, "<p class=\"more\">… and {}<code>{}</code>{}</p>", xml(a), xml(s(&rows[row], "name")), xml(b));
     }
     o.push_str("</section>\n");
     o

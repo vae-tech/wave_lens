@@ -239,9 +239,24 @@ const COLL = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { numeri
 const stripPfx = (name, pfx) => { const p = pfx.find(p => name.startsWith(p) && name.length > p.length); return p ? [p, name.slice(p.length)] : ['', name]; };
 // rows in display order: siblings (one group level, between {} spacers) sorted by name; groups move as a block;
 // groupOrder: 'first' / 'last' = inside every group the sub-groups (modules) come before / after the signals; 'file' = as given
-// own: your order (alt+↑ ↓ in the names; the state's "order"): a module's path ('' the top) -> the names of its rows in your order.
-// The places of the rows it names (in each run between spacers, after the sort) are filled again in its order; a row it does
-// not name (a signal new in the dump) keeps its place
+// own: your order (alt+↑ ↓ in the names; the state's "order"): a module's path ('' the top) -> the keys of its rows in your order
+// (ownKeys: the name; a second row of that name in the module "valid#2"). The places of the rows it names (in each run between
+// spacers, after the sort) are filled again in its order; a row it does not name (a signal new in the dump) keeps its place
+// a row's key in your order (A-03): its name among its siblings (one module, the file's order); the second and later of one
+// name (two "valid" of a WaveJSON group, a signal and a module "sub") "valid#2", "valid#3" -> Map(row -> key)
+function ownKeys(rows) {
+  const n = new Map(), out = new Map();
+  for (const r of rows) { if (r.type === 'space') continue;
+    const k = (r.anc.length ? r.anc[r.anc.length - 1] : '') + '\u0000' + r.name, i = (n.get(k) || 0) + 1; n.set(k, i);
+    out.set(r, i === 1 ? r.name : `${r.name}#${i}`); }
+  return out;
+}
+// a list of your order as read: 0.62's plain names (one name twice: the second is "name#2") as the keys
+function ownList(L) {
+  const set = new Set(L), seen = new Map();
+  return L.map(n => { const i = (seen.get(n) || 0) + 1; seen.set(n, i); const k = `${n}#${i}`;
+    return i > 1 && !set.has(k) ? k : n; });
+}
 function orderRows(rows, dir, pfx, groupOrder, own = null) {
   const sorting = dir === 'asc' || dir === 'desc', gs = groupOrder === 'first' ? -1 : groupOrder === 'last' ? 1 : 0;
   const mine = own && Object.keys(own).length ? own : null;
@@ -252,10 +267,11 @@ function orderRows(rows, dir, pfx, groupOrder, own = null) {
   const c = (x, y) => (COLL ? COLL.compare(x, y) : x < y ? -1 : x > y ? 1 : 0);
   const byName = (a, b) => sgn * (c(key(a), key(b)) || c(a.name, b.name));   // i_data / o_data: full name breaks the tie
   const cmp = (a, b) => gs * ((a.type === 'group') - (b.type === 'group')) || (sorting ? byName(a, b) : 0);   // stable sort
+  const keys = mine ? ownKeys(rows) : null, key2 = r => keys.get(r);
   const yours = (run, path) => {
-    const L = mine && Array.isArray(mine[path]) ? mine[path] : null; if (!L) return run;
+    const L = mine && Array.isArray(mine[path]) ? ownList(mine[path]) : null; if (!L) return run;
     const at = new Map(); L.forEach((n, i) => { if (!at.has(n)) at.set(n, i); });
-    const k = run.map((r, i) => (at.has(r.name) ? i : -1)).filter(i => i >= 0), put = k.map(i => run[i]).sort((a, b) => at.get(a.name) - at.get(b.name));
+    const k = run.map((r, i) => (at.has(key2(r)) ? i : -1)).filter(i => i >= 0), put = k.map(i => run[i]).sort((a, b) => at.get(key2(a)) - at.get(key2(b)));
     k.forEach((i, j) => { run[i] = put[j]; }); return run;
   };
   const out = [];
@@ -268,7 +284,7 @@ function orderRows(rows, dir, pfx, groupOrder, own = null) {
   emit(kids.get(null), '');
   return out;
 }
-// your order as the state keeps it: a module's path -> its rows' names (strings), a list of none left out
+// your order as the state keeps it: a module's path -> its rows' keys (strings, ownKeys), a list of none left out
 const ownOrder = o => Object.fromEntries(Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {})
   .filter(([, l]) => Array.isArray(l) && l.length).map(([p, l]) => [p, l.map(String)]));
 
@@ -2839,13 +2855,15 @@ const HELP = [
   ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
     [['c'], 'zoom in on the cursor'],
     [['ctrl+wheel', 'pinch'], 'zoom at the pointer'], [['wheel'], 'scroll the rows'], [['shift+wheel', 'drag', '←', '→'], 'pan'],
-      [['shift+drag', 'middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows']]],
+      [['shift+drag', 'middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows'],
+    [['the bar under the waves'], 'zoomed in: all of the waves, the window its thumb: drag it, click its track (held: the window\'s ends)']]],
   ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'],
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
     [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there, ✎ or F2 renames'],
     [['gv'], 'the waves with the gaps cut out, or in continuous time'],
-    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group or its module (shift: the group, the module); or drag it in your group'],
+    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group or its module (shift: the group, the module; a sort drops your order of the module: '
+      + 'that sort again brings it back); or drag it in your group'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
@@ -2855,16 +2873,17 @@ const HELP = [
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
     [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'],
-    [['*', '#'], 'find the selected name: its next / previous match']]],
+    [['*', '#'], 'find the selected name: its next / previous match'],
+    [['/ in the assertions panel'], 'find assertions: name* @signal in:scope is:fail (Mask: only them on the waves; Esc empties it)']]],
   ['Measure and mark', [[['shift+click'], 'a second cursor: Δ to the cursor, in cycles of the clock'], [['x'], 'swap the cursors'],
     [['c147'], 'in the cursor field: cycle 147 of the clock (right button: Cycles ▸, a band of them under the axis)'],
-    [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
+    [[']d', '[d'], 'next / previous difference from a dump compared (File ▾ → Compare with…, then Compare)'],
     [['d'], 'a dump compared: flip the waves between the two runs (the time axis names the one shown)'],
     [['D'], 'a dump compared: both runs over each other where they differ, again one'],
     [['gb'], 'a dump compared: the red mask over the differences on or off (off: d blinks between the runs)'],
     [['g='], 'compare A and B (Compare… a file, the Runs panel\'s) over the window in sight; zoomed since: again'],
     [['gu'], 'the runs kept of this dump (VS Code): keep this one, show one (A), compare one with it (B) over the waves in sight or a span'],
-    [[']r', '[r'], 'B: compare A with the next (older) / previous run kept, over the same window'],
+    [[']r', '[r'], 'B: pick the next (older) / previous run kept (g= compares it with A over the window in sight)'],
     [[']w', '[w'], 'A: the waves of the next (older) / previous run kept shown here, the view kept (now among them)'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'],
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
@@ -2911,9 +2930,12 @@ const KEY_MENUS = {
     ['a', 'open or fold it'], ['z', 'zoom to the range', v => !!v.range || v.cursor2 != null]]],
   y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)'],
     ['i', 'an image of the range (else the window)'], ['I', 'an image of all rows']]],
-  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
+  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp],
+    ['r', 'run kept (picked as B; g= compares)', v => v.runsHost()],
     ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
-  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
+  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp],
+    ['r', 'run kept (picked as B; g= compares)', v => v.runsHost()],
+
     ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
 };
 
@@ -3100,7 +3122,7 @@ class Bar {
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas>` +
         `<div class="hsb" hidden title="All of the waves: drag the window, click to bring it there (held: its ends)">` +
-        '<div class="hsbt"></div>' +
+        '<div class="hsbt"></div><div class="hsbk"></div>' +
         `<span class="hsbtip" hidden></span></div></div></div>
       <div class="notes" hidden></div>
       <div class="wlog" hidden></div>
@@ -3754,6 +3776,7 @@ class WaveView {
     // the menu's radix per signal, hidden rows, the buses shown bit by bit (their bit rows: bitsOf)
     this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.order = {};
     this.bitsOpen = new Set(); this.bitMemo = new WeakMap(); this.dups = new Map(); this.dupsBy = new Map(); this.deltas = false; this.loadRows();
+    this.orderWas = null; this.ordBasis = this.orderBasis();   // your order's sort (orderCheck)
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     // the narrowest view: a millionth of the dump, at most 1 ns (a 200 ms dump: one clock edge, not 20 periods), at least 10 ps
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(Math.min(this.span / 1e6, 1000), 10) : 0.5);
@@ -3844,7 +3867,7 @@ class WaveView {
     for (const [name, v] of styleVars(Object.assign({}, this.M.cfg, this.opts))) this.root.style.setProperty(name, v);
     this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.cycMemo = null;
     this.hdrH = this.headH(); this.syncGapBar();
-    this.sort = S.sort; this.sortIgnore = S.sortIgnore;
+    this.sort = S.sort; this.sortIgnore = S.sortIgnore; if (this.order) this.orderCheck();   // (configure: another sort, groupOrder)
     this.root.style.setProperty('--wv-dim', S.dim);
     this.arrangeTools(); this.layoutShow();   // (cursorStrip: the cursor and the edges over the axis or in the lines)
     const hlFrom = JSON.stringify(S.highlight ?? null);   // a new "highlight" setting (configure) replaces the picks
@@ -4187,13 +4210,26 @@ class WaveView {
   }
   settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavelens:settings')); }   // sort, prefixes, settings
   // dir: none | asc | desc; ignore: prefixes skipped when comparing names ("i_,o_" or an array)
-  setSort(dir, ignore) {   // another order of the names: your order (alt+↑ ↓ on the dump's rows) dropped, said (undo brings it back)
-    const was = Object.keys(this.order).length;
-    if (sortDir(dir) !== this.sort && was) { this.order = {}; this.rowsStale = true; this.saveRows();
-      this.toast(`your order of ${was === 1 ? 'one module' : was + ' modules'} dropped for the sort (ctrl+Z: back)`); }
+  // -> the viewer; its orderDropped: the modules of your order another sort dropped (0: none). o.quiet: no toast (the command says it)
+  setSort(dir, ignore, o = {}) {   // another order of the names: your order (alt+↑ ↓ on the dump's rows) dropped, said (undo brings it back)
     this.sort = sortDir(dir);
     if (ignore !== undefined) this.sortIgnore = prefixes(ignore).sort((a, b) => b.length - a.length);
+    this.orderDropped = this.orderCheck(o.quiet);
     this.renderNames(); this.draw(); this.settingsChanged(); return this;
+  }
+  // your order (alt+↑ ↓ on the dump's rows) is of the sort it was made under: the sort, its prefixes, groupOrder (B-22). Another one
+  // drops it, said, and keeps it aside (orderWas; this browser keeps it, as the sort is not kept: B-21); that one again, with no
+  // order made meanwhile, brings it back. -> the modules dropped
+  orderBasis() { return `${this.sort}|${this.sortIgnore.join(',')}|${this.S.groupOrder || 'file'}`; }
+  orderCheck(quiet = false) {
+    const now = this.orderBasis(), was = this.ordBasis ?? now, n = Object.keys(this.order).length; this.ordBasis = now;
+    if (was === now) return 0;
+    const mods = k => (k === 1 ? 'one module' : k + ' modules');
+    if (n) { this.orderWas = { order: this.order, basis: was }; this.order = {}; this.rowsStale = true; this.saveRows();
+      if (!quiet) this.toast(`your order of ${mods(n)} dropped for the sort (ctrl+Z, or the sort as it was: back)`); return n; }
+    if (this.orderWas && this.orderWas.basis === now) { this.order = this.orderWas.order; this.orderWas = null; this.rowsStale = true; this.saveRows();
+      if (!quiet) this.toast(`your order of ${mods(Object.keys(this.order).length)} back with the sort it was made under`); }
+    return 0;
   }
   // highlight: list of full paths / names / "*" patterns (one colour each), or null to clear; returns the viewer
   highlight(list) { this.picks = hlPick(this.M, list, this.rowPool()); this.renderNames(); this.draw(); return this; }
@@ -4445,7 +4481,7 @@ class WaveView {
       cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
         sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
-        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false,
+        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false, scrollbar: this.S.scrollbar !== false,
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: this.hlOrder().map(r => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
@@ -4496,6 +4532,7 @@ class WaveView {
     const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]);
     const seen = p => paths.has(p) || !!this.sigByPath(p) || (miss.add(p), false);   // a bit of a bus too ("data[3]")
     if (C.style !== undefined) this.setStyle(C.style);
+    if (C.scrollbar !== undefined) this.setScrollbar(C.scrollbar, { quiet: true });
     if (C.compareMask !== undefined) this.compareMask(C.compareMask ?? this.S.compareMask, true);
     if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
@@ -4514,6 +4551,7 @@ class WaveView {
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
       this.sort = sortDir(C.sort ?? this.sort); if (C.sortIgnore !== undefined) this.sortIgnore = prefixes(C.sortIgnore).sort((a, b) => b.length - a.length);
       for (const pfx of this.root.querySelectorAll('input.pfx')) pfx.value = this.sortIgnore.join(','); this.fitPfx();
+      if (st.order === undefined) this.orderCheck(); else this.ordBasis = this.orderBasis();   // another sort and no order: yours dropped, said (B-22)
     }
     for (const [act, [own, k]] of Object.entries(FIND_VIEW)) if (C[k] !== undefined) {
       this[own] = !!C[k]; this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[own]);
@@ -4540,7 +4578,7 @@ class WaveView {
       for (const [p, n] of Object.entries(st.analog || {})) if (seen(p)) this.setAnalog(p, n, true);
     }
     if (st.radix !== undefined || st.analog !== undefined) this.saveRows();   // once (renderNames and draw: find() below)
-    if (st.order !== undefined) { this.order = ownOrder(st.order); this.rowsStale = true; this.saveRows(); }
+    if (st.order !== undefined) { this.order = ownOrder(st.order); this.orderWas = null; this.rowsStale = true; this.saveRows(); }
     if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.rowsStale = true; this.saveRows(); }
     if (st.bits !== undefined) { this.bitsOpen = new Set((st.bits || []).map(String).filter(p => seen(p) && isVec(this.sigByPath(p)))); this.rowsStale = true;
       this.saveRows(); }
@@ -4571,13 +4609,20 @@ class WaveView {
         { signal: m.signal && !seen(m.signal) ? null : m.signal, dsignal: m.dsignal && !seen(m.dsignal) ? null : m.dsignal }));
       this.umarks = markNorm(ms); this.setMarks(); } else if (st.deltas !== undefined) this.setMarks();
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
-    if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);   // a second dump compared (diff.js)
+    // a second dump compared (diff.js); one made of another A (a run's waves, its "a") is of other waves: not drawn here, said (B-02)
+    const cmpA = st.compare && typeof st.compare === 'object' && st.compare.a != null ? +st.compare.a || 0 : null;
+    if (cmpA != null && cmpA !== this.runsA()) {
+      const s = `the saved compare with ${st.compare.name || 'B'} is of A ${this.runName(cmpA)}, not of these waves (A ${this.runName(this.runsA())}): not ` +
+        'drawn — Compare again';
+      this.toast(s); this.log('info', s);
+      if (this.cmp) this.compareResult(null, true);
+    } else if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);
     if (st.runsOver !== undefined) { const w = st.runsOver;   // the window the runs are compared over (runs.js): one of the spans
       this.runsWin = w && typeof w === 'object' && isFinite(w.from) && isFinite(w.to) ? { label: String(w.label || ''), from: +w.from, to: +w.to } : null;
       if (this.runsP) this.runsP.windows(); }
     // the Runs panel's mode: open (a row chosen opens its waves: no B, a run compared is dropped) or compare (it is B)
     if (st.runsMode !== undefined) this.runsModeSet(st.runsMode, true);
-    if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
+    if (st.compareShow && this.cmp && cmpA == null && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
       await this.compareView(st.compareShow, true); }
 
     if (st.select !== undefined) {   // a new selection: no run of the one before, its row the anchor; the row of it in view (a copy in your group
@@ -4762,6 +4807,8 @@ class WaveView {
         this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
       // a second dump compared (read here, not a saved result) is read again too, and shown as it was
       const cmpAgain = keep && this.cmp && !this.cmp.result && this.cmpSrc ? { ...this.cmpSrc, run: this.cmpRun } : null;
+      // a compare that is not picked again over the new waves (a result given whole: a saved view's, a tool's): its going said (B-02)
+      const cmpGone = keep && this.cmp && !cmpAgain && this.runCur == null && !this.cmpRedo() ? this.cmp.name : null;
       this.runsTo = keep && typeof keep === 'object' ? keep.runs : undefined;   // a run shown (runsShow): the A asked, with this open
       const st = keep ? this.runsKeep() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null,
@@ -4776,7 +4823,8 @@ class WaveView {
         try { await v.setState(Object.assign({}, piece, { wavelens: 'state' })); } catch (e) { v.logError(e, `${file.name}: its view: ${e.message}`); } }
       if (cmpAgain) v.comparePick({ file: cmpAgain.file, name: cmpAgain.name, show: cmpAgain.run });   // B picked again: Compare compares it (as shown)
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
-      await v.runsAgain(runs);   // the Runs panel too, and the run compared is compared again with the new waves
+      await v.runsAgain(runs);   // the Runs panel too, and the run compared is picked again over the new waves
+      if (cmpGone) v.runsNote = `${v.runsNote ? v.runsNote + ' · ' : ''}the compare with ${cmpGone} dropped: it was of the waves before (Compare… again)`;
       const bad = r.log.filter(x => x.level !== 'info').length;
       v.toast((file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules, read as you open them` : `${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
@@ -5307,7 +5355,7 @@ class WaveView {
     else if (s === 'gB') this.bookmarkKey();
     else if (s === 'gd') this.run({ op: 'deltas', on: !this.deltas });
     else if (s === 'g=') this.compareGo();
-    else if (s === 'gb') { if (this.cmp) this.run({ op: 'compare', mask: this.cmpMask === false }); else this.toast('gb: compare with a second dump first'); }
+    else if (s === 'gb') { if (this.cmp) this.run({ op: 'compare', mask: this.cmpMask === false }); else this.toast(this.cmpNone('gb')); }
     else if (s === 'gc') this.clearMarks();
     else if (s === 'gs') bar('ssave');
     else if (s === 'gL') bar('sload');
@@ -6363,6 +6411,7 @@ Object.assign(WaveView.prototype, {
       (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
       (gk === 'divider' ? '' : b('hide', many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? `Hide this ${gk}` : 'Hide')) +
       b('copyname', many ? `Copy the ${sigs.length} paths` : 'Copy the path') +
+      (sig && !many && this.sva && this.sva.qAll().length ? b('svasig', 'Assertions on this signal', 'The Assertions panel\'s search: @ its full path') : '') +
       // your groups: its place there (or a group's among yours), into / out of a group, a new one, delete; go to any of them
       menuSub('subg', 'Your groups',
         (own && mvAt2[1] > 1 ? `<div class="mh">its place in ${esc(ownIn)} (alt+↑ ↓)</div>` + mvs(ownIn) : '') +   // the dump's rows: your order
@@ -6501,6 +6550,7 @@ Object.assign(WaveView.prototype, {
           this.changed(true); }, '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
+      else if (act === 'svasig') { this.closeMenu(); this.sva.onSignal((sig0.of || sig0).full); return this; }   // (a bit: its bus)
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
       else if (act === 'copylink') {   // the place clicked (on a signal: snapped as Bookmark here), M-08
         const t = at == null ? this.cursor : sig ? this.snap(sig, at) : at;
@@ -6895,8 +6945,9 @@ const barKeep = (v, part) => {
 };
 G.addEventListener('storage', e => { if (e.key === BARKEY || e.key === null) for (const w of VIEWS) if (w.root.isConnected) w.barReload(); });
 // the horizontal scroll bar at the foot of the waves in sight (the setting scrollbar): its track all of the waves (the gaps on
-// the waves: the cut-out axis, as the window shows it), its thumb the window. A drag moves the window, a click on the track
-// brings the window's middle there; while it is held, the window's ends, rounded to its scale, over the thumb
+// the waves: the cut-out axis, as the window shows it), its thumb the window. A drag moves the window, a click on the track (its
+// lowest 4 px: the rest of the strip lets the clicks through to the last row, B-20) brings the window's middle there; while it is
+// held, the window's ends, rounded to its scale, over the thumb
 const HSB_H = 10;
 Object.assign(WaveView.prototype, {
   hsbGeom() {
@@ -6905,6 +6956,12 @@ Object.assign(WaveView.prototype, {
     return { T: M.t1 - M.t0, a: this.t0 - M.t0, b: this.t0 - M.t0 + this.span, F: null };
   },
   hsbTo(a) { const g = this.hsbGeom(); if (g.F) this.warpPlace(g.F, a); else this.t0 = this.clamp(this.M.t0 + a); this.draw(); },
+  // the thumb on a track W px wide: w its width (at least 18 px), x its left; the window's start 0 … T − (b − a) on 0 … W − w (B-19:
+  // flush right only with the window at the end), k the time of a pixel of the thumb's way
+  hsbThumb(g, W) {
+    const span = g.b - g.a, w = Math.min(W, Math.max(span / g.T * W, 18)), room = Math.max(g.T - span, 0), way = W - w;
+    return { w, x: way > 0 && room > 0 ? Math.max(0, Math.min(g.a / room, 1)) * way : 0, k: way > 0 ? room / way : 0 };
+  },
   // after a frame (draw): the bar on the last line of the canvas in sight, its thumb where the window is; none when all is in it
   hsbPlace(f) {
     const el = this.hsbEl; if (!el) return;
@@ -6912,12 +6969,19 @@ Object.assign(WaveView.prototype, {
     if (el.hidden === on) el.hidden = !on;
     if (!on) return;
     this.hsbF = f;
-    const W = f.W, w = Math.min(W, Math.max((g.b - g.a) / g.T * W, 18)), x = Math.max(0, Math.min(g.a / g.T * W, W - w)), t = el.firstChild;
-    // on the canvas's last line, or the screen's (the box's) when the canvas goes on under it: in sight
+    const { w, x } = this.hsbThumb(g, f.W), t = el.firstChild;
+    // on the canvas's last line, or the screen's (the box's, the screen's when the box goes on under it: B-18) when the canvas
+    // goes on under it: in sight
     const own = this.root.classList.contains('wv-scroll'), top = this.wcol.getBoundingClientRect().top;
-    const low = (own ? this.bodyEl.getBoundingClientRect().bottom : window.innerHeight) - top;
+    const low = Math.min(own ? this.bodyEl.getBoundingClientRect().bottom : Infinity, window.innerHeight) - top;
     el.style.top = Math.max(f.oy, Math.min(f.oy + f.Hc, low) - HSB_H) + 'px'; t.style.left = x + 'px'; t.style.width = w + 'px';
     if (this.hsbHeld) this.hsbTip();
+  },
+  // the setting scrollbar of this viewer (the command layout scrollbar, a state's config; M-07): null, the settings' own
+  setScrollbar(on, o = {}) {
+    const base = settings(GLOBAL, this.M.cfg, this.opts).scrollbar !== false, want = on == null ? base : !!on;
+    if (want === base) delete this.local.scrollbar; else this.local.scrollbar = want;
+    this.S.scrollbar = want; if (!o.quiet) this.draw(); return this;
   },
   hsbTip() {
     const tip = this.hsbEl.querySelector('.hsbtip'), t = this.hsbEl.firstChild, f = x => this.fmt(x, this.span / 100, this.span);
@@ -6929,9 +6993,9 @@ Object.assign(WaveView.prototype, {
     const el = this.hsbEl; if (!el) return; let d = null;
     el.addEventListener('pointerdown', e => {
       if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
-      const r = el.getBoundingClientRect(), g = this.hsbGeom(), k = g.T / Math.max(r.width, 1);
+      const r = el.getBoundingClientRect(), g = this.hsbGeom(), { w, k } = this.hsbThumb(g, r.width);
       this.markView();   // l: the window before
-      if (e.target !== el.firstChild) this.hsbTo((e.clientX - r.left) * k - (g.b - g.a) / 2);   // the track: the window's middle there
+      if (e.target !== el.firstChild) this.hsbTo((e.clientX - r.left - w / 2) * k);   // the track: the thumb's (the window's) middle there
       d = { x: e.clientX, a: this.hsbGeom().a, k, id: e.pointerId };
       try { el.setPointerCapture(e.pointerId); } catch (x) { /* gone */ }
       el.classList.add('on'); this.hsbHeld = true; this.hsbTip();
@@ -7043,13 +7107,14 @@ Object.assign(WaveView.prototype, {
   },
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || Object.keys(this.order).length || this.analogs.size ||
+      const order = Object.keys(this.order).length ? this.order : (this.orderWas && this.orderWas.order) || {};   // a sort's drop: kept aside (B-21)
+      if (this.radixes.size || this.hiddenRows.size || Object.keys(order).length || this.analogs.size ||
         this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas ||
         (this.M.measures || []).length) {   // (the Δ off on a page with measurements: kept off)
         localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
           groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas,
-          ...(Object.keys(this.order).length ? { order: ownOrder(this.order) } : {}) }));
+          ...(Object.keys(order).length ? { order: ownOrder(order) } : {}) }));
       } else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   },
@@ -8119,6 +8184,9 @@ function cmdTime(v, x, what = 't') {
   if (t == null || !isFinite(t)) fail(`${what}: "${x}" is not a time (a number in ${v.M.timed ? 'ps' : 'cycles'}, or "250ns")`);
   return t;
 }
+// a text of a command (a label, a bookmark's text): String() of it (a list "1,2"), not an object (M-08: "[object Object]"); null: none
+const cmdStr = (x, what) => { if (x == null) return ''; if (typeof x === 'object' && !Array.isArray(x)) fail(`${what}: a text, not ${JSON.stringify(x)}`);
+  return String(x); };
 // a time something is put at (a bookmark, a marker, a span's end): inside the waves (from 0 when they start later: a test's mark at its start)
 function cmdIn(v, x, what = 't') {
   const t = cmdTime(v, x, what), lo = Math.min(0, v.M.t0);
@@ -8236,8 +8304,8 @@ command('bookmark', 'n? t? signal? text? label? color? lift? top? link? go? dele
     v.bms.push(b); }
   if (t != null) { b.t = t; delete b.at; }   // the event its time came from (mkhtml.py) no longer says it
   if (a.signal !== undefined) b.signal = sig;
-  if (a.text !== undefined) b.text = a.text == null ? '' : String(a.text);
-  if (a.label !== undefined) b.label = a.label == null ? '' : String(a.label);
+  if (a.text !== undefined) b.text = cmdStr(a.text, 'text');
+  if (a.label !== undefined) b.label = cmdStr(a.label, 'label');
   if (a.color !== undefined) b.color = cmdColor(a);
   if (a.lift !== undefined) b.lift = liftOf(a.lift);
   if (a.top !== undefined) b.top = top;
@@ -8269,7 +8337,7 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   const x = v.arrows[i]; x.from = from; x.to = to;
   for (const k of ['shape', 'head', 'line']) if (a[k] != null) x[k] = a[k];
   if (a.color !== undefined) x.color = cmdColor(a);
-  if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
+  if (a.label !== undefined) x.label = cmdStr(a.label, 'label');
   v.changed(true); return { id: i + 1 };
 });
 // dmin over dmax of one kind (two times, or two counts of cycles): a bound no Δ keeps, refused
@@ -8300,7 +8368,7 @@ command('marker', 'id? t? label? color? signal? lift? hidden? dmin? dmax? delete
   boundsOk(bd, a, [m || {}]);
   if (!m) { m = { t: v.cursor, label: '', color: null, signal: null, lift: false }; v.umarks.push(m); }
   if (t != null) m.t = t;
-  if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
+  if (a.label !== undefined) m.label = cmdStr(a.label, 'label');
   if (a.color !== undefined) m.color = cmdColor(a);
   if (a.signal !== undefined) m.signal = sig;
   if (a.lift != null) m.lift = a.lift;
@@ -8418,7 +8486,8 @@ command('expr_markers', 'id? label? color? signal? limit? deltas? delete?', 'a m
   for (const id of gone) { v.umarks.splice(id - 1, 1); markGone(v.umarks, id); }
   if (a.delete) { v.setMarks(); return { id: x.id, deleted: gone.length }; }
   const from = v.t0, to = v.t0 + v.span, S = x.spans.map(p => p[0]).filter(t => t >= from && t <= to), n = Math.min(S.length, +(a.limit ?? EXPR_MARKERS));
-  const base = a.label != null ? String(a.label) : x.label || `ƒ${x.id}`, color = a.color !== undefined ? a.color || null : x.color, k0 = v.umarks.length;
+  const base = a.label != null ? cmdStr(a.label, 'label') : x.label || `ƒ${x.id}`;
+  const color = a.color !== undefined ? a.color || null : x.color, k0 = v.umarks.length;
   v.umarks.push(...markNorm(S.slice(0, n).map((t, k) => ({ t, label: `${base} ${k + 1}`, color, signal: sig, dto: k + 1 < n ? k0 + k + 2 : 0,
     expr: x.text }))));
   if (n && a.deltas !== false) { v.deltas = true; v.saveRows(); }
@@ -8426,29 +8495,54 @@ command('expr_markers', 'id? label? color? signal? limit? deltas? delete?', 'a m
   if (S.length > n) v.toast(`${n} of ${S.length} matches: narrow the window for the others`);
   return { id: x.id, markers: n, more: S.length - n, from, to };
 });
-command('compare', 'result? dump? a? map? offset? off? show? mask?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
-  'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
-  'show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over each other where they differ), alone or with result; ' +
-  'mask: the red bands on (true, the setting compareMask) or off (d then flips between the two runs alone)',
+// the Assertions panel's search (wavelens/sva.js): its query and Mask, kept in the state as svaFilter (tools/viewedit.py writes
+// the same into a page's file; what it finds is the page's)
+const svaPanel = v => v.sva || fail('assertions need sva.js in the page (no mkhtml.py --no-sva)');
+command('sva', 'filter? mask?', 'the Assertions panel\'s search: filter a text (name* @signal in:scope is:fail …; "" or null: none), mask: the waves ' +
+  'draw only what it finds (over svaShow) -> {filter, mask, errors (terms not understood: nothing filtered by them), count, matches: [{assert, scope, ' +
+  'signals: {name: full path}, state, counts}], evaluating (bindings a filter by results cannot judge yet), drawn (assertion groups on the waves)}',
+(v, a) => {
+  if (a.filter != null && typeof a.filter !== 'string') fail(`sva: filter is a text (name* @signal in:scope is:fail), not ${JSON.stringify(a.filter)}`);
+  if (a.mask != null && typeof a.mask !== 'boolean') fail('sva: mask: true or false');
+  return svaPanel(v).command(a);
+});
+command('compare', 'result? dump? a? map? offset? off? show? mask? from? to? go?', 'a second dump over these waves, where its values differ (red bands, ≠, ' +
+  ']d [d): result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump, over from … to when given); off: compared ' +
+  'no more, nothing picked; go: Compare as the bar\'s (g=) — B picked, or the compare on the waves made again, over the window in sight (from … to: ' +
+  'the waves zoomed there first); show: which run the waves show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over ' +
+  'each other where they differ), alone or with result; mask: the red bands on (true, the setting compareMask) or off (d then flips between the two ' +
+  'runs alone). It answers the window compared (from, to)',
 async (v, a) => {
-  if (a.off) { v.compareResult(null); return { off: true }; }
   if (a.mask != null && typeof a.mask !== 'boolean') fail('mask: true or false');
-  if (a.mask != null) { v.compareMask(a.mask, true); if (a.result == null && a.show == null && a.dump == null) return { mask: v.cmpMask }; }
+  if (a.off && a.mask != null) v.compareMask(a.mask, true);   // with off: the setting kept for the next compare (M-07: not ignored)
+  if (a.off) { v.compareOff(); return { off: true }; }   // the bar's ✕: the picks go too (review 2026-11-18 M-03)
+  const said = r => ({ name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing, from: r.from, to: r.to });
+  if (a.mask != null) { v.compareMask(a.mask, true); if (a.result == null && a.show == null && a.dump == null && !a.go) return { mask: v.cmpMask }; }
+  if (a.show != null && !CMP_SHOWS.includes(a.show)) fail(`compare: show is ${CMP_SHOWS.join(', ')}, not "${a.show}"`);
+  if (a.go) {   // the bar's Compare (M-03): what it says when it does not compare is the error
+    if (a.result != null || a.dump != null) fail('compare go: Compare of what is picked, not with result or dump');
+    if ((a.from == null) !== (a.to == null)) fail('compare go: from and to, or neither (the window in sight)');
+    if (a.from != null) { const p = cmdTime(v, a.from, 'from'), q = cmdTime(v, a.to, 'to');
+      if (!(q > p)) fail('compare go: "to" is not after "from"'); v.zoomTo(p, q); }
+    const r = await v.compareGo();
+    if (!r) { const t = v.root.querySelector('.bar .toast'); fail((t && t.textContent) || 'compare go: nothing compared'); }
+    return Object.assign(said(r), a.show != null ? { show: await v.compareView(a.show, true) } : {});
+  }
+  if (a.from != null || a.to != null) fail('compare: from and to are of go (here) or of dump (tools/viewedit.py, view_edit)');
   const shown = async () => {
     const no = v.cmpCant(a.show); if (no) fail(no);
     await v.compareView(a.show, true); return v.cmpRun;
   };
-  if (a.show != null && !CMP_SHOWS.includes(a.show)) fail(`compare: show is ${CMP_SHOWS.join(', ')}, not "${a.show}"`);
   if (a.result != null) {
     const r = v.compareResult(a.result, true);
     if (!r) fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves');
-    return Object.assign({ name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing },
-      a.show != null ? { show: await shown() } : {});
+    v.cmpPk = { a: null, b: null }; v.cmpShow();   // B given: nothing picked is left over it (M-03)
+    return Object.assign(said(r), a.show != null ? { show: await shown() } : {});
   }
   if (a.show != null && a.dump == null) return { show: await shown(), name: v.cmp.name };
   if (a.dump != null) fail('compare dump: a page reads no file by itself: pick it with Compare… here; an agent gives result (view_edit makes it of dump ' +
     'on the page\'s file, or live)');
-  fail('compare: result, show, mask or off');
+  fail('compare: result, go, show, mask or off');
 });
 command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
   'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
@@ -8469,7 +8563,7 @@ command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stre
   if (from != null) s.from = from;
   if (to != null) s.to = to;
   if (s.from > s.to) [s.from, s.to] = [s.to, s.from];
-  if (a.label !== undefined) s.label = a.label == null ? '' : String(a.label);
+  if (a.label !== undefined) s.label = cmdStr(a.label, 'label');
   if (a.color !== undefined) s.color = cmdColor(a);
   if (sigs !== undefined) s.signals = sigs.length ? sigs : null;
   v.changed(true); return { id: v.spans.indexOf(s) + 1 };
@@ -8484,6 +8578,8 @@ command('group', 'name signals? add? remove? color? rename? delete? go? move? di
     v.setGroups(); return { name, deleted: true }; }   // hidden: a new group of that name is shown
   const fulls = spec => sigsOf(v, pickRows(v, spec, { groups: true })).map(r => r.full);
   const set = a.signals != null ? fulls(a.signals) : null, add = a.add != null ? fulls(a.add) : [], rm = a.remove != null ? fulls(a.remove) : [];
+  if (a.rename != null && typeof a.rename !== 'string') fail('rename: a name (a text)');
+  if (a.rename != null && !g) fail(`no group "${name}" to rename`);
   const to = a.rename != null ? String(a.rename).trim() : null;
   if (to === '' || (to && to !== name && v.ugroups.some(x => x.name === to))) fail(`rename: ${to ? `a group "${to}" is there` : 'a name'}`);
   const mv = a.move;
@@ -8661,26 +8757,69 @@ command('bits', 'signals on?', 'buses shown bit by bit, a row per bit under each
   const rows = pickRows(v, a.signals), bad = rows.filter(r => !isVec(r)); if (bad.length) fail(`not a bus: ${bad.map(r => r.full).join(', ')}`);
   v.setBits(rows, a.on ?? true); return { signals: rows.length };
 });
-command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore: prefixes left out when comparing ("i_,o_")', (v, a) => {
+command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore: prefixes left out when comparing ("i_,o_"); another sort ' +
+  'drops your order (order), orderDropped: the modules it had', (v, a) => {
   if (!SORTS.includes(a.dir)) fail(`dir: one of ${SORTS.join(' ')}`);
-  v.setSort(a.dir, a.ignore ?? undefined); return { sort: v.sort, ignore: v.sortIgnore };
+  const n = v.setSort(a.dir, a.ignore ?? undefined, { quiet: true }).orderDropped;
+  return { sort: v.sort, ignore: v.sortIgnore, ...(n ? { orderDropped: n } : {}) };
+});
+// the row of the dump the command order names: as pickRows; two rows of one path (a signal and a module "sub", two "valid" of a
+// WaveJSON group) told apart as your order does, "top.sub#2" the second
+function ownPick(v, spec) {
+  const at = (full, n) => v.M.rows.filter(r => r.type !== 'space' && r.full === full)[n - 1];
+  let hit; try { hit = pickRows(v, spec, { groups: true }); } catch (e) {
+    const m = /^(.*)#(\d+)$/.exec(spec), r = m && at(m[1], +m[2]); if (r) return r; throw e; }
+  const fulls = [...new Set(hit.map(r => r.full))];
+  if (fulls.length !== 1) fail(`one signal or module, not ${fulls.length} (${fulls.slice(0, 4).join(', ')})`);
+  const same = v.M.rows.filter(r => r.type !== 'space' && r.full === fulls[0]);
+  const kind = r => (r.type === 'group' ? 'a module' : 'a signal');
+  if (same.length > 1) fail(`two rows "${fulls[0]}" (${same.map(kind).join(', ')}): the second is "${fulls[0]}#2"`);
+  return hit[0];
+}
+command('order', 'signal? move? module? clear?', 'your order of the dump\'s rows (alt+↑ ↓ in the names; the state\'s "order"): signal (a signal or ' +
+  'a module of the dump) moved among the rows of its module shown, up, down, top, bottom or a number (1: the first); module: true moves the ' +
+  'module it is in; clear: true all of your order, or with signal its module\'s', (v, a) => {
+  const mv = a.move;
+  if (mv != null && !['up', 'down', 'top', 'bottom'].includes(mv) && !(Number.isInteger(mv) && mv >= 1)) {
+    fail('move: up, down, top, bottom or a number (1: the first)'); }
+  if (a.module != null && typeof a.module !== 'boolean') fail('module: true or false');
+  if (a.clear != null && typeof a.clear !== 'boolean') fail('clear: true or false');
+  const place = r => { const P = v.ownPlace(r), tag = ownKeys(v.M.rows).get(r).slice(r.name.length);   // a second row of its name: "#2"
+    return { signal: r.full + tag, module: P.path, at: P.i + 1, of: P.n }; };
+  let r = a.signal != null ? ownPick(v, String(a.signal)) : null;
+  if (r && !v.ownRow(r)) fail(`${r.full}: a row of your groups, a copy or a bit has no place of its own in the dump (group … move for yours)`);
+  if (r && a.module) { const p = r.anc.length && v.M.groups[r.anc[r.anc.length - 1]]; if (!p || !v.ownRow(p)) fail(`${r.full}: at the top, no module`); r = p; }
+  if (a.clear) {
+    if (mv != null) fail('clear or move, not both');
+    const path = r ? v.ownPlace(r).path : null, was = Object.keys(v.order).length;
+    v.order = path == null ? {} : Object.fromEntries(Object.entries(v.order).filter(([p]) => p !== path)); v.orderWas = null;
+    v.rowsStale = true; v.allRows(); v.saveRows(); v.renderNames(); v.draw();
+    return { cleared: was - Object.keys(v.order).length };
+  }
+  if (!r) fail('order: a signal (with move), or clear');
+  if (mv == null) return place(r);
+  const moved = v.moveOwn(mv === 'up' ? -1 : mv === 'down' ? 1 : mv === 'top' ? -Infinity : mv === 'bottom' ? Infinity : 0, false, r,
+    { one: true, quiet: true, ...(Number.isInteger(mv) ? { at: mv } : {}) });
+  return { ...place(r), moved: !!moved };
 });
 command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null: the settings')`, (v, a) => {
   if (a.name != null && !hasKey(EDGES, a.name)) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
 });
-command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?', 'where the rows scroll: window (in the viewer, ' +
+command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt? scrollbar?', 'where the rows scroll: window (in the viewer, ' +
   'height: "80vh", 600) or page (with the page, the bar sticking to the top); tools: fold or open (the bar\'s tools to its title line); compact: ' +
   'the bar\'s short form, auto (a bar narrower than 900 px), true or false; bar: its groups arranged, lines of their labels ([["find", "cursor"], ' +
   '["list"]]; null: the default order); stripGroups: the groups in the strip over the time axis (["find", "cursor"]; []: no strip; null: the ' +
   'default); at: groups placed in their line or the strip, {"marks": 0.5} (0 left .. 1 right, "left", "center", "right"; null: in the flow); ' +
-  'strip, stripAt: 0.53\'s, the cursor and the edges in the strip or not, their place',
+  'strip, stripAt: 0.53\'s, the cursor and the edges in the strip or not, their place; scrollbar: the scroll bar at the foot of the waves ' +
+  '(the setting scrollbar; null: the settings\')',
   (v, a) => {
   if (a.scroll != null && !['window', 'page'].includes(a.scroll)) fail('scroll: window or page');
   if (a.tools != null && !['fold', 'open'].includes(a.tools)) fail('tools: fold or open');
   if (a.compact != null && ![true, false, 'auto'].includes(a.compact)) fail('compact: auto, true or false');
   if (a.bar != null && !toolLines(a.bar)) fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null');
   if (a.strip != null && typeof a.strip !== 'boolean') fail('strip: true or false');
+  if (a.scrollbar != null && typeof a.scrollbar !== 'boolean') fail('scrollbar: true, false or null');
   const placeOk = p => (typeof p === 'number' ? p >= 0 && p <= 1 : hasKey(STRIP_AT, String(p).toLowerCase()));
   if (a.stripAt != null && !placeOk(a.stripAt)) fail('stripAt: 0 .. 1, "left", "center" or "right"');
   if (a.stripGroups != null && !Array.isArray(a.stripGroups)) fail('stripGroups: a list of group labels, ["find", "cursor"], or null');
@@ -8698,9 +8837,10 @@ command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? 
     v.setToolAt(A, { only: true }); }
   if (a.strip != null) v.setCursorStrip(a.strip, { only: true });
   if (a.stripAt != null) v.setStripAt(a.stripAt, { only: true });
+  if ('scrollbar' in a) v.setScrollbar(a.scrollbar);
   return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open',
     compact: compactOf(v.S.toolsCompact), bar: toolLines(v.S.toolLayout), stripGroups: stripNames(v.S.stripGroups), at: toolAts(v.S.toolAt),
-    strip: v.S.cursorStrip !== false, stripAt: toolAts(v.S.toolAt).cursor ?? stripAt(v.S.cursorStripAt) };
+    strip: v.S.cursorStrip !== false, stripAt: toolAts(v.S.toolAt).cursor ?? stripAt(v.S.cursorStripAt), scrollbar: v.S.scrollbar !== false };
 });
 command('find', 'query case? word? regex? highlight? open? mask?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s ' +
   'buttons',
@@ -8833,7 +8973,7 @@ Object.assign(WaveView.prototype, {
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
         sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
-        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false },
+        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false, scrollbar: this.S.scrollbar !== false },
         this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
   },
@@ -8952,24 +9092,28 @@ Object.assign(WaveView.prototype, {
       n: rest.filter(x => shown.has(x)).length + 1 };
   },
   ownRow(r) { return r && (r.type === 'sig' || r.type === 'group') && !r.ug && !r.user && !r.dupOf && r.bit == null && this.M.rows.includes(r); },
-  moveOwn(dir, whole = false, r = this.sel) {
-    if (!this.ownRow(r)) { this.toast('this row has no place of its own to move to (a copy, a bit, a plugin\'s row)'); return false; }
+  // o: {one: true} the row alone (not the selected run it is in), {at: n} to the n-th place of its run (1: the first; the command
+  // order), {quiet: true} no toast
+  moveOwn(dir, whole = false, r = this.sel, o = {}) {
+    const say = m => { if (!o.quiet) this.toast(m); return false; };
+    if (!this.ownRow(r)) return say('this row has no place of its own to move to (a copy, a bit, a plugin\'s row)');
     if (whole) { const p = r.anc.length && this.M.groups[r.anc[r.anc.length - 1]];
-      if (!p || !this.ownRow(p)) { this.toast('at the top: no module to move'); return false; } return this.moveOwn(dir, false, p); }
-    const blk0 = r.type === 'sig' && this.selRun.size > 1 && this.selRun.has(r) ? [...this.selRun] : [r];
+      if (!p || !this.ownRow(p)) return say('at the top: no module to move'); return this.moveOwn(dir, false, p, o); }
+    const blk0 = !o.one && r.type === 'sig' && this.selRun.size > 1 && this.selRun.has(r) ? [...this.selRun] : [r];
     const P0 = this.ownPlace(r), blk = P0.run.filter(x => blk0.includes(x)), P = this.ownPlace(r, blk), rest = P.rest;
     let pos = P.pos;
-    if (dir === -Infinity) pos = 0;
+    if (o.at != null) { let k = 0, j = 0; while (j < rest.length && k < o.at - 1) { if (P.shown.has(rest[j])) k++; j++; } pos = j; }
+    else if (dir === -Infinity) pos = 0;
     else if (dir === Infinity) pos = rest.length;
     else if (dir < 0) { let k = pos - 1; while (k >= 0 && !P.shown.has(rest[k])) k--; if (k < 0) return false; pos = k; }
     else { let k = pos; while (k < rest.length && !P.shown.has(rest[k])) k++; if (k >= rest.length) return false; pos = k + 1; }
     if (pos === P.pos) return false;
     rest.splice(pos, 0, ...blk);
-    const list = P.sib.slice(0, P.a).concat(rest, P.sib.slice(P.b + 1)).filter(x => x.type !== 'space').map(x => x.name);
-    this.order = Object.assign({}, this.order, { [P.path]: list });
+    const K = ownKeys(this.M.rows), list = P.sib.slice(0, P.a).concat(rest, P.sib.slice(P.b + 1)).filter(x => x.type !== 'space').map(x => K.get(x));
+    this.order = Object.assign({}, this.order, { [P.path]: list }); this.orderWas = null;   // (a sort's dropped order: this one now)
     this.allRows(); this.saveRows(); this.renderNames(); this.draw();
     const Q = this.ownPlace(r, blk);
-    this.toast(`${blk.length === 1 ? r.name : blk.length + ' rows'}: ${Q.i + 1} of ${Q.n} in ${P.path || 'the top'}`); return true;
+    if (!o.quiet) this.toast(`${blk.length === 1 ? r.name : blk.length + ' rows'}: ${Q.i + 1} of ${Q.n} in ${P.path || 'the top'}`); return true;
   },
   // a drag in the names: the rows of your groups (a signal, a run of selected ones, a group's header) to another place in
   // them or another group of yours; a line where they go; 6 px before it starts (a click stays a click); the pointer
@@ -9067,7 +9211,7 @@ Object.assign(WaveView.prototype, {
 const SHARE = { on: false };   // markers being shared (shareMarks): the others do not share them back
 const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits', 'order'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', 'toolsCompact', 'toolLayout', 'stripGroups', 'toolAt', 'cursorStrip',
-  'cursorStripAt', ...GAP_KEYS, ...CYC_KEYS];
+  'cursorStripAt', 'scrollbar', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];
 const UNDO_N = 100;   // the steps undo keeps
@@ -9469,15 +9613,23 @@ Object.assign(WaveView.prototype, {
   // missing, omitted, first, from, to } (null: nothing compared; a newer call or the viewer gone meanwhile: null).
   // win {from, to}: compared over that window only (Compare: the waves in sight), else over all of the page's time; B is
   // read once (over the page's time) and kept: Compare again over another window reads nothing
+  // B picked: what B is and what it was of are set where the compare is made (cmpMade), so a compare that fails keeps the pick
+  // and the one before (review 2026-11-18 B-03); a large dump's rows are read exact over the window first (B-14)
   async compare(file, name, win) {
     const req = this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop();
     if (file == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     const mine = this.cmpRows();
     if (!this.M.timed || !mine.length) {
       this.toast('compare: these waves are clock-sampled (one cell per cycle): open the dump itself (Open…) and compare that'); return null; }
-    const nm = name || file.name || 'B'; this.cmpSrc = { file, name: nm }; this.cmpPick = null;   // what ⟳ reads again (openDump)
-    // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
+    const nm = name || file.name || 'B';
+    // a compare that fails leaves the one before as it was, and says so (its bands are still drawn); B stays picked
     const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
+    const fail = s => { if (req === this.cmpReq && VIEWS.has(this)) { this.toast(s); this.cmpShow(); } return null; };
+    const w0 = win && isFinite(win.from) ? Math.max(win.from, this.M.t0) : this.M.t0, w1 = win && isFinite(win.to) ? Math.min(win.to, this.M.t1) : this.M.t1;
+    if (this.lazy) {   // the rows of a large dump not read yet, or held in part, are no values to compare: read exact over the window
+      try { await this.exactRows(mine, w0, w1, 'a compare'); } catch (e) { this.picHold = null; return fail(`compare: ${e.message}${still()}`); }
+      if (req !== this.cmpReq || !VIEWS.has(this)) { this.picHold = null; return null; }
+    }
     let doc;
     // B's variables that could be these rows (a path, a name, the last part of either: cmpFind's), its changes over their time
     const only = new Set();
@@ -9494,12 +9646,12 @@ Object.assign(WaveView.prototype, {
       try {   // a File in pieces; a text, or something with a text(), at once
         doc = (typeof file === 'string' ? vcdToWave(file, o) : typeof file.stream === 'function' ? await vcdToWaveFile(file, o) :
           vcdToWave(await file.text(), o)).doc; }
-      catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { this.toast(`${nm}: ${e.message}${still()}`);
-        this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } return null; }
+      catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { fail(`${nm}: ${e.message}${still()}`);
+        this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } this.picHold = null; return null; }
       finally { if (this.cmpReading === req) { this.cmpReading = 0; this.cmpShow(); } }
       this.cmpDoc = { file, name: nm, doc };
     }
-    if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
+    if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) { this.picHold = null; return null; }   // compared again, or no more
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
     for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
     const om = (doc.meta && doc.meta.omitted && doc.meta.omitted.paths) || {}, left = new Set(), leftLeaf = new Map();   // left out by B's reader
@@ -9507,13 +9659,12 @@ Object.assign(WaveView.prototype, {
       for (const n of ns) { const p = sc ? sc + '.' + n : n; left.add(p); leftLeaf.set(n, (leftLeaf.get(n) || []).concat([p])); }
     }
     const scope = (this.M.src && this.M.src.meta && this.M.src.meta.scope) || '';
-    const w0 = win && isFinite(win.from) ? Math.max(win.from, this.M.t0) : this.M.t0, w1 = win && isFinite(win.to) ? Math.min(win.to, this.M.t1) : this.M.t1;
     const from = Math.max(w0, doc.time.t0 ?? 0), to = Math.min(w1, doc.time.t1 ?? this.M.t1), rows = new Map();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
-    if (to <= from) { this.toast(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ${f(doc.time.t0 ?? 0)} … ` +
-      `${f(doc.time.t1)}): nothing compared${still()}`); return null; }
+    if (to <= from) { this.picHold = null; return fail(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ` +
+      `${f(doc.time.t0 ?? 0)} … ${f(doc.time.t1)}): nothing compared${still()}`); }
     if (!left.size && !mine.some(a => cmpFind(bs, byLeaf, a, scope))) {   // as sva diff: nothing to compare is no compare (the one before stays)
-      this.toast(`${nm}: none of these ${mine.length} signals is in it: nothing compared${still()}`); return null; }
+      this.picHold = null; return fail(`${nm}: none of these ${mine.length} signals is in it: nothing compared${still()}`); }
     this.cmpBack();   // these rows' own values again: compared with B, or the one before
     let differ = 0, missing = 0, omitted = 0; const byName = [];
     for (const a of mine) {
@@ -9529,8 +9680,11 @@ Object.assign(WaveView.prototype, {
       rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null, by, row: spans.length && !other ? b : null });
       if (spans.length) differ++;
     }
+    this.picHold = null;
     this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
-      byName, waves: true };
+      byName, waves: true, a: this.runsA(), asked: win ? { from: w0, to: w1 } : null };
+    this.cmpSrc = { file, name: nm };   // what ⟳ reads again (openDump), Compare compares again over another window
+    if (this.cmpPick && this.cmpPick.file === file) this.cmpPick = null;   // the pick is the compare now (a later pick stays)
     this.cmpMarks(); this.cmpShow(); this.draw();
     const c = this.cmp, who = this.cmpWho();
     const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}${who}` +
@@ -9538,7 +9692,8 @@ Object.assign(WaveView.prototype, {
       (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)}${win ? '' : ' (both dumps)'}` : '') +
       (byName.length ? ' · ' + cmpByName(c) : '');
     this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
-    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length, rank: c.rank };
+    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length, rank: c.rank,
+      ...(c.asked ? { asked: c.asked } : {}) };
   },
   // who differed first and what followed (the compare's rank), for its toast: " · first PSEL, then PENABLE +10 ns"
   cmpWho() {
@@ -9556,7 +9711,7 @@ Object.assign(WaveView.prototype, {
       if (x.missing || x.omitted) missing.push(cmpPath(r));
       else signals[cmpPath(r)] = Object.assign({ spans: x.spans }, x.other ? { other: x.other } : {});
     }
-    return { name: c.name, from: c.from, to: c.to, first: c.first, signals, missing };
+    return Object.assign({ name: c.name, from: c.from, to: c.to, first: c.first, signals, missing }, c.a ? { a: c.a } : {}, c.asked ? { asked: c.asked } : {});
   },
   // the compare result of a row: a struct's group row its vector, a row of your groups its signal, a bit of a bus its own
   cmpOf(r) {
@@ -9619,10 +9774,13 @@ Object.assign(WaveView.prototype, {
     if (walk) walk.parentElement.hidden = !this.cmp;
     if (g && g.hidden === on) { g.hidden = !on; this.layoutShow(); }
     if (this.cmpReading) { b.hidden = false; b.textContent = '≠ … ✕'; b.title = 'reading the second dump: click to stop'; return; }
-    b.hidden = !this.cmp && !pend; b.textContent = this.cmp ? `≠ ${this.cmp.differ} ✕` : `B: ${this.cmpPendName()} ✕`;
+    // nothing compared, a pick: B's name, else A's (only A picked: its waves open with Compare; B-23)
+    const pb = this.cmpPicked().b, pickTxt = pb ? `B: ${this.cmpPendName()}` : `A: ${this.runName(this.runPickA)}`;
+    b.hidden = !this.cmp && !pend; b.textContent = this.cmp ? `≠ ${this.cmp.differ} ✕` : `${pickTxt} ✕`;
     b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :
       ''}${this.cmp.byName.length ? `; ${cmpByName(this.cmp)}` : ''}; ]d [d go to the differences; click: compare no more` :
-      pend ? `${this.cmpPendName()} picked, not compared yet: Compare (g=) compares it; click: drop it` : '';
+      pend ? (pb ? `${this.cmpPendName()} picked, not compared yet: Compare (g=) compares it; click: drop it` : `A ${this.runName(this.runPickA)} ` +
+        'picked: Compare (g=) opens its waves here (pick B too: a run in the Runs panel); click: drop it') : '';
   },
   // the red bands of a dump compared (paintCmp); B shown: the time it does not cover shaded
   paintDiff(P, lay, X, t0, t1) {
@@ -9648,7 +9806,7 @@ Object.assign(WaveView.prototype, {
   },
   // why this view cannot be shown, '' when it can
   cmpCant(show) {
-    if (!this.cmp) return `compare ${show}: compare with a second dump first (Compare… in the bar)`;
+    if (!this.cmp) return this.cmpNone(`compare ${show}`);
     return show === 'a' || this.cmpCan() ? '' : `compare ${show}: this compare has the differences only, not the values of ${this.cmp.name} ` +
       '(a saved one, a cut too large for the page, one of --align): compare again';
   },
@@ -9694,20 +9852,41 @@ Object.assign(WaveView.prototype, {
     this.root.dispatchEvent(new CustomEvent('wavelens:compare', { detail: { show, name: show === 'a' ? na : nb } }));
     return show;
   },
+  // The picks (review 2026-11-18 A-02): one object, cmpPicked() {a, b} — a: a run's id picked as A (its waves open with Compare),
+  // b: B, one slot for both kinds, {run: id} of the Runs panel or {file: {file | path, name, show?}} of Compare… — so the later
+  // pick of B wins, whichever kind (B-08). runPickA, runPickB and cmpPick read and write it (runs.js): setting one kind of B to
+  // null leaves a pick of the other kind. A compare made of a pick clears it; one that fails keeps it.
+  cmpPicked() { return this.cmpPk || (this.cmpPk = { a: null, b: null }); },
   // B picked, nothing compared yet: a file of Compare… (a File here, a path the host picked) or a run of the Runs panel (B, A
   // picked: runs.js) — Compare (g=, the bar's, c in the Runs panel) compares A and B over the window in sight
   comparePick(b, quiet = false) {
-    if (b) { this.runsDrop(); this.runPickB = null; if (this.runsP) this.runsP.render(); }   // a file is B now: a run's compare asked not taken
-    this.cmpPick = b || null; this.cmpShow();
+    const p = this.cmpPicked();
+    if (b) { this.runsDrop(); p.b = { file: b }; if (this.runsP) this.runsP.render(); }   // a file is B now: a run's compare asked not taken
+    else if (p.b && p.b.file) p.b = null;
+    this.cmpShow();
     if (b && !quiet) this.toast(`B: ${b.name} picked · Compare (g=) compares it with these waves over the window in sight`);
     return this;
   },
   // the name of what is picked (the bar's B: …)
-  cmpPendName() { return this.cmpPick ? this.cmpPick.name : this.runPickB != null ? this.runName(this.runPickB) :
+  cmpPendName() { const b = this.cmpPicked().b; return b ? (b.file ? b.file.name : this.runName(b.run)) :
     this.runPickA != null ? `A ${this.runName(this.runPickA)}` : ''; },
+  // what d, D, ]d, gb, … say with no compare on the waves: B picked (Compare compares it), else how to get one (B-23)
+  cmpNone(what) {
+    return this.cmpPicked().b ? `${what}: B ${this.cmpPendName()} is picked, not compared yet: Compare (g=) compares it` :
+      `${what}: compare with a second dump first (pick B: File ▾ → Compare with…, gC, or a run in the Runs panel, gu; then Compare, g=)`;
+  },
   // ✕: compared no more, and nothing picked
-  compareOff() { this.runPickA = this.runPickB = null; this.cmpPick = null; if (this.cmp) this.compare(null); else this.cmpShow();
+  compareOff() { this.cmpPk = { a: null, b: null }; if (this.cmp) this.compare(null); else this.cmpShow();
     if (this.runsP) this.runsP.render(); return this; },
+  // how the compare on the waves is made again over another window (Compare): {run} a run of the Runs panel, {path, name} a file
+  // the host compares, {file, name} a dump read here; null when it cannot be — a result given whole (a saved view, a tool's, the
+  // page's own): Compare is not lit for it, and says so (review 2026-11-18 A-01, M-02)
+  cmpRedo() {
+    const c = this.cmp, h = this.runsHost(); if (!c) return null;
+    if (this.runCur != null) return h ? { run: this.runCur } : null;
+    if (c.result) { const p = c.result.src && c.result.src.path; return typeof p === 'string' && p && h && h.compareFile ? { path: p, name: c.name } : null; }
+    return this.cmpSrc || null;
+  },
   // what a Compare waits for: a file picked, a run picked as A or B (the Runs panel) that is not the compare on the waves
   cmpPend() { return !!this.cmpPick || (this.runPickA != null && this.runPickA !== this.runsA()) || (this.runPickB != null && this.runPickB !== this.runCur); },
   // Compare's look after the window moved (draw): lit, its title, only when that changed
@@ -9717,31 +9896,36 @@ Object.assign(WaveView.prototype, {
     for (const g of gs) if (g) g.classList.toggle('stale', !!st);
     if (gs[0] && gs[0].hidden === !!st) { gs[0].hidden = !st; this.layoutShow(); }   // the bar's: shown while it has something to do
   },
-  // the compare on the waves is not of the window in sight (zoomed, panned: '' when it is) -> why, for the button
+  // the compare on the waves is not of the window in sight (zoomed, panned: '' when it is) -> why, for the button. The window
+  // asked is the compare's own (asked), not the time its result covers: the host rounds it to ps, B may end before it (B-01); a
+  // compare of all the time, or one that cannot be made again (cmpRedo), is never stale
   cmpStale() {
     if (this.cmpPend()) return 'B or A picked';
-    if (!this.cmp || !this.runsWindow) return '';
+    const c = this.cmp; if (!c || !c.asked || !this.cmpRedo()) return '';
     const w = this.runsWindow(), e = Math.max(this.span * 1e-6, 1e-9);
-    return Math.abs(w.from - this.cmp.from) > e || Math.abs(w.to - this.cmp.to) > e ? 'the window moved since' : '';
+    return Math.abs(w.from - c.asked.from) > e || Math.abs(w.to - c.asked.to) > e ? 'the window moved since' : '';
   },
   // Compare: A and B over the window in sight (your span chosen in the Runs panel: that span) — a run picked (runs.js runsGo:
   // A opened first when picked), else the file picked, else the one compared again over the window of now
   async compareGo() {
     if (this.runPickB != null || this.runPickA != null || (this.runCur != null && !this.cmpPick)) return this.runsGo();
-    const c = this.cmp, p = this.cmpPick || (c && c.result && c.result.src && c.result.src.path ? { name: c.name, path: c.result.src.path } :
-      c && !c.result && this.cmpSrc ? this.cmpSrc : null);
-    if (!p) { this.toast('Compare: pick B first — Compare… (gC) a dump, or a run in the Runs panel (gu)'); return null; }
-    const w = this.runsWindow(), sh = c ? this.cmpRun : p.show || 'a';
+    const c = this.cmp, pick = this.cmpPick, p = pick || this.cmpRedo();
+    if (!p) { this.toast(c ? `Compare: the compare with ${c.name} was given made (a saved view, a tool, the page's own) and is not made again here — ` +
+      'pick B again (File ▾ → Compare with…, gC), then Compare' :
+      'Compare: pick B first — File ▾ → Compare with… (gC) a dump, or a run in the Runs panel (gu)'); return null; }
+    const w = this.runsWindow(), sh = c ? this.cmpRun : p.show || 'a', asked = { from: w.from, to: w.to };
     if (!p.path) { const r = await this.compare(p.file, p.name, w); if (r && sh !== 'a' && this.cmpCan()) await this.compareView(sh, true); return r; }
     const h = this.runsHost(); if (!h || !h.compareFile) { this.toast('Compare: the host compares a file it picked (VS Code)'); return null; }
-    const still = this.cmpAsk();
+    // the host's sva diff is stopped by a newer ask, ✕ or no B (runsDrop: runs cancel; review 2026-11-18 V-03)
+    const still = this.cmpAsk(), req = this.runWait = this.runReq;
     this.cmpReading = this.cmpReq; this.cmpShow(); this.toast(`comparing with ${p.name} over the window in sight…`);
     let m; try { m = await h.compareFile(p.path, this.runsSignals(), w.from, w.to, this.runsA()); } catch (e) { m = { error: e.message }; }
+    if (this.runWait === req) this.runWait = 0;
     if (this.cmpReading) { this.cmpReading = 0; }
     if (!still()) return null;
     if (m.error || !m.result) { this.cmpShow(); this.toast(`${p.name}: ${m.error || 'no answer'}`); return null; }
-    this.cmpPick = null;
-    const r = this.compareResult(m.result);
+    if (pick && this.cmpPick === pick) this.cmpPick = null;   // the pick is the compare now (a later one stays)
+    const r = this.compareResult(Object.assign(m.result, { a: this.runsA() || null, asked }), false, { asked });
     if (r && sh !== 'a' && this.cmpCan()) await this.compareView(sh, true);
     return r;
   },
@@ -9753,9 +9937,9 @@ Object.assign(WaveView.prototype, {
     return this;
   },
   // d: the other run (from the overlay: A); D: the overlay, again the run before it
-  cmpFlip() { if (!this.cmp) { this.toast('d: compare with a second dump first (Compare… in the bar)'); return this; }
+  cmpFlip() { if (!this.cmp) { this.toast(this.cmpNone('d')); return this; }
     this.compareView(this.cmpRun === 'b' ? 'a' : this.cmpRun === 'overlay' ? 'a' : 'b'); return this; },
-  cmpBoth() { if (!this.cmp) { this.toast('D: compare with a second dump first (Compare… in the bar)'); return this; }
+  cmpBoth() { if (!this.cmp) { this.toast(this.cmpNone('D')); return this; }
     this.compareView(this.cmpRun === 'overlay' ? this.cmpLast || 'a' : 'overlay'); return this; },
   // the value at the cursor in the overlay: both when they differ
   valueBoth(s, t) {
@@ -9770,9 +9954,10 @@ Object.assign(WaveView.prototype, {
     return v === String(this.valueAt(r, t)) ? '' : `\n${b ? 'A' : 'B'}: ${v}`;
   },
   // a compare result already made (sva diff's, by the build from the config's "compare", or the command compare): the WaveJSON
-  // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path]} over these waves, as compare()
-  // puts a dump read here; null: compared no more. quiet: no toast (the page opens with it) -> as compare()
-  compareResult(c, quiet) {
+  // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path], asked?, a?, run?, src?} over these
+  // waves, as compare() puts a dump read here; null: compared no more. quiet: no toast (the page opens with it). of.asked (else
+  // the result's asked): the window Compare asked, which tells it stale (A-01) -> as compare()
+  compareResult(c, quiet, of = {}) {
     this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop();
     if (c == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     c = cmpNorm(c);
@@ -9792,8 +9977,10 @@ Object.assign(WaveView.prototype, {
       rows.set(a, { spans, other: s.other || null, by: null, b: s.b || null });
       if (spans.length) differ++;
     }
+    const win = of.asked || c.asked, asked = win && isFinite(win.from) && isFinite(win.to) ? { from: +win.from, to: +win.to } : null;
     this.cmp = { name: c.name, rows, differ, missing, omitted: 0, compared: rows.size - missing, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
-      byName: [], result: Object.assign({}, c, { from, to }) };
+      byName: [], a: this.runsA(), asked, result: Object.assign({}, c, { from, to, a: this.runsA() || undefined }, asked ? { asked } : {}) };
+    if (!this.cmp.result.a) delete this.cmp.result.a;   // of these waves: A, the run shown (none: the dump of now)
     this.cmpMarks(); this.cmpShow(); this.draw();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
     const who = this.cmpWho();
@@ -9801,13 +9988,14 @@ Object.assign(WaveView.prototype, {
       (missing ? ` · ${missing} not in it` : '') + (from > t0 || to < t1 ? ` · compared ${f(from)} … ${f(to)}` : '');
     if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
     this.log('ok', 'compared with ' + said);
-    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank };
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank,
+      ...(asked ? { asked } : {}) };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to). In the view: a row drawn, a row of your
   // groups standing for its signal (.orig: Only keeps your groups whole, the signal's module left out)
   diffStep(dir) {
-    if (!this.cmp) { this.toast(']d [d: compare with a second dump first (Compare… in the bar)'); return this; }
+    if (!this.cmp) { this.toast(this.cmpNone(']d [d')); return this; }
     const s = this.sel && this.cmpOf(this.sel), some = this.onlyOn() || this.hiddenRows.size;
     const drawn = () => { if (this.rowsStale) this.allRows(); return new Set((this.rowsAll || []).map(r => r.orig || r)); };
     const ts = s && s.spans.length ? s.spans.map(([a]) => a) : !some ? this.cmp.starts :
@@ -10946,10 +11134,23 @@ const tagHue = t => {
 // a case's name of a span's label: without "TC3 " before it and " · PASS" after it (cocotb's marks); sva runs.rs case_name
 const caseName = l => { const s = String(l || '').split(' · ')[0].trim(), m = /^TC\d+ (.*)$/.exec(s); return (m ? m[1] : s).trim(); };
 const sameSpan = (s, w) => !!s && !!w && s.from === w.from && s.to === w.to && (s.label || '') === (w.label || '');
+// the settings that name the runs' directory, as said: the user's, the workspace's, a workspace folder's (dirOf.scope)
+const runsScope = s => (s === 'user' ? 'user' : s === 'folder' ? 'workspace folder' : 'workspace');
 // B: the run compared (its id; 0 the dump of now, while A is a run), the compare's own: dropped with it (✕, compare off,
 // Compare… with a file), kept with it in a saved state
 Object.defineProperty(WaveView.prototype, 'runCur', { configurable: true,
   get() { const c = this.cmp && this.cmp.result; return c && c.run != null && isFinite(c.run) ? +c.run : null; } });
+// the picks as three names (the one object is diff.js cmpPicked: A's id, and one B, a run or a file): runPickA, the run picked as
+// A; runPickB, the run picked as B; cmpPick, the file picked as B. Setting B of one kind replaces B of the other (the later pick
+// wins); null clears that kind only
+Object.defineProperty(WaveView.prototype, 'runPickA', { configurable: true,
+  get() { return this.cmpPicked().a; }, set(x) { this.cmpPicked().a = x ?? null; } });
+Object.defineProperty(WaveView.prototype, 'runPickB', { configurable: true,
+  get() { const b = this.cmpPicked().b; return b && b.run != null ? b.run : null; },
+  set(x) { const p = this.cmpPicked(); if (x != null) p.b = { run: x }; else if (p.b && p.b.run != null) p.b = null; } });
+Object.defineProperty(WaveView.prototype, 'cmpPick', { configurable: true,
+  get() { const b = this.cmpPicked().b; return b && b.file ? b.file : null; },
+  set(x) { const p = this.cmpPicked(); if (x) p.b = { file: x }; else if (p.b && p.b.file) p.b = null; } });
 Object.assign(WaveView.prototype, {
   // who keeps the runs: the page's host (VS Code), null in a browser
   runsHost() { return this.opts.runsHost || (typeof window !== 'undefined' && window.WAVELENS_RUNS) || null; },
@@ -10990,8 +11191,9 @@ Object.assign(WaveView.prototype, {
   },
   // the window a run is compared over: your span chosen (runsWin: its label, from and to — the span followed by what it is,
   // not by its place in the list), else the waves in sight; inside the page's time. A span gone: the waves in sight again (said)
+  // A page without a host has no Runs panel to show or change the span (a state's runsOver loaded there): the waves in sight (B-23)
   runsWindow() {
-    const { t0, t1 } = this.M, w = this.runsWin, s = w ? this.spans.find(x => sameSpan(x, w)) : null;
+    const { t0, t1 } = this.M, w = this.runsHost() ? this.runsWin : null, s = w ? this.spans.find(x => sameSpan(x, w)) : null;
     if (w && !s) { this.runsWin = null;
       if (this.runsP) { this.runsP.windows(); this.runsP.status(`the span ${w.label || ''} is gone: over the waves in sight`); } }
     const a = s ? s.from : this.t0, b = s ? s.to : this.t0 + this.span, from = Math.min(Math.max(a, t0), t1);
@@ -11000,15 +11202,32 @@ Object.assign(WaveView.prototype, {
   // the paths compared: the rows of the view, as Compare… sends them
   runsSignals() { return this.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full); },
   // the runs of this dump as the host lists them (newest first), read again when asked (the panel, ]r [r, runs.json changed);
-  // the dump of now with them (runsNow: its name, time and size on the disk)
+  // the dump of now with them (runsNow: its name, time and size on the disk). The directory another than the one before (a ★
+  // in any tab, the setting edited): runsMoved
   async runsList(again) {
     const h = this.runsHost(); if (!h) return [];
     if (!this.runsL || again) {
       const m = await h.list(); if (m.error) throw new Error(m.error);
+      const was = this.runsDir;
       this.runsL = (m.runs || []).slice().reverse(); this.runsDir = m.dir || ''; this.runsOthers = m.others || 0; this.runsNow = m.now || null;
       this.runsDirOf = m.dirOf || null;   // where the directory comes from: {set: the setting's text ('' the default), scope}
+      if (was && this.runsDir && was !== this.runsDir) this.runsMoved(was);
     }
     return this.runsL;
+  },
+  // the runs' directory moved under these waves (review 2026-11-18 V-01): its runs are others, their numbers too — the run
+  // compared, the picks of runs and Δ all's numbers dropped; a run shown as A: the dump of now shown again (its file is read,
+  // but no run of the new directory has that number). A file compared or picked stays (no run)
+  runsMoved(was) {
+    const b = this.runCur, a = this.runsA();
+    this.runsDrop(); this.runPickA = null; this.runPickB = null; this.runsTried = null;
+    if (b != null) this.compare(null); else this.cmpShow();
+    if (this.runsP) { this.runsP.deltas.clear(); this.runsP.render(); }
+    const s = `the runs' directory is now ${this.runsDir} (was ${was})${b != null ? `: the compare with ${this.runName(b)} dropped` : ''}` +
+      `${a ? `; ${this.runName(a)} was A: the dump of now shown again` : ''}`;
+    if (this.runsP) this.runsP.status(s);
+    this.log('info', s, { quiet: true });
+    if (a) this.runsShow(0, true);
   },
   // A compared with B (a run's id; 0: the dump of now, while A is a run) over the window: the view shown (A, B, A+B) kept;
   // a later ask wins (the host stops the one before). show: the view to show after it (a step of A: the one of before)
@@ -11030,22 +11249,27 @@ Object.assign(WaveView.prototype, {
     if (this.runsP) this.runsP.status(`comparing ${na} with ${nb} over ${what}…`);
     let m;
     this.runWait = req;
-    try { m = await h.compare(Object.assign({ id, against: a, signals: this.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
+    // dir: the directory the ids are of (the host refuses them when it moved meanwhile: V-01)
+    try { m = await h.compare(Object.assign({ id, against: a, signals: this.runsSignals(), from: w.from, to: w.to, dir: this.runsDir || undefined },
+      byCase ? { case: cn } : {})); }
     catch (e) { m = { error: e.message }; }
     if (this.runWait === req) this.runWait = 0;
     if (req !== this.runReq) return null;   // another run asked meanwhile, or B dropped or replaced (runsDrop)
     if (m.error || !m.result) { const e = m.error || 'no result'; this.toast(`${nb}: ${e}`); if (this.runsP) this.runsP.status(`${nb}: ${e}`);
       return null; }
-    Object.assign(m.result, { name: this.runName(id), run: id, a: a || null });   // B named, and both ids: the saved state has them
+    // B named, both ids and the window asked: the saved state has them (a compare of another A is not taken: setState), and
+    // Compare is lit by the window asked, not by the time the result covers (B-01)
+    const asked = { from: w.from, to: w.to };
+    Object.assign(m.result, { name: this.runName(id), run: id, a: a || null, asked });
     if (this.runPickB === id) this.runPickB = null; if (this.runPickA === a) this.runPickA = null;   // the picks are the compare now
-    const r = this.compareResult(m.result, quiet);
+    const r = this.compareResult(m.result, quiet, { asked });
     if (!r) return null;
     if (sh !== 'a' && this.cmpCan()) await this.compareView(sh, true);
     if (this.runsP) { this.runsP.got(id, w, r);
       this.runsP.status(runSaid(na, nb, r, m.result, w, f, this.cmpCan()) + (cn && !byCase && run && run.cases ? ` · no case ${cn} in it` : '')); }
     return r;
   },
-  // the panel's mode: 'compare' (a row chosen is B, compared with A) or 'open' (a row chosen opens its waves here, one run
+  // the panel's mode: 'compare' (a row chosen is picked as B, compared with A by Compare) or 'open' (a row chosen opens its waves here, one run
   // after another: no B, nothing compared — the B of before dropped); kept with the view's state (runsMode)
   runsModeSet(mode, quiet) {
     const m = mode === 'open' ? 'open' : 'compare', was = this.runsMode === 'open' ? 'open' : 'compare', b = this.runCur;
@@ -11056,8 +11280,9 @@ Object.assign(WaveView.prototype, {
     return this;
   },
   // a slice's span on the waves shown (A): the window and the range on the slice's start and end — its from … to in the time
-  // of the dump it was cut from, less A's origin when A is a slice itself (its times from 0) — so Slice ▸ takes the same
-  // piece of these waves. A span past an end of A: cut to A (said); wholly outside: said, not applied -> [from, to] or null
+  // of the dump it was cut from, less A's origin when A is a slice itself (its times from 0) — so Range ▸ Keep as a slice / Save
+  // as FST… takes the same piece of these waves. A span past an end of A: cut to A (said); wholly outside: said, not applied ->
+  // [from, to] or null
   runsSpan(id, quiet) {
     const say = s => { if (!quiet) this.toast(s); if (this.runsP) this.runsP.status(s); };
     const r = (this.runsL || []).find(x => x.id === id), s = r && r.slice, name = this.runName(id);
@@ -11071,7 +11296,7 @@ Object.assign(WaveView.prototype, {
       'not applied'); return null; }
     this.zoomTo(lo, hi); this.warpSync(); this.setRange(lo, hi);
     say(`the span of ${name} on A ${this.runName(a)}: the window and the range ${f(lo)} … ${f(hi)}${of}` +
-      `${lo > p || hi < q ? ` — cut to these waves (its ${f(p)} … ${f(q)})` : ''} · Slice ▸ takes this piece`);
+      `${lo > p || hi < q ? ` — cut to these waves (its ${f(p)} … ${f(q)})` : ''} · Range ▸ Keep as a slice (or Save as FST…) takes this piece`);
     return [lo, hi];
   },
   // ★: the directory of the runs made the permanent one (on false: no more) — the host writes the setting wavelens.runsDir
@@ -11082,11 +11307,9 @@ Object.assign(WaveView.prototype, {
     let m; try { m = await h.dir(!!on); } catch (e) { m = { error: e.message }; }
     if (m.error) return say(`the runs' directory: ${m.error}`);
     const o = m.dirOf || {}, was = this.runsDir, moved = m.dir !== was;
-    const where = o.scope ? `the ${o.scope === 'user' ? 'user' : 'workspace'}'s settings` : 'the settings';
-    // another directory: its runs are others (their numbers too) — no B, no Δ of before, the dump of now shown
-    if (moved) { this.runsDrop(); if (this.runCur != null) this.compare(null); if (this.runsP) this.runsP.deltas.clear(); }
+    const where = o.scope ? `the ${runsScope(o.scope)}'s settings` : 'the settings';
+    // another directory: its runs are others (their numbers too) — no B, no Δ of before, the dump of now shown (runsList: runsMoved)
     if (this.runsP) await this.runsP.load(); else await this.runsList(true).catch(() => {});
-    if (moved && this.runsA()) this.runsShow(0, true);
     return say(o.set ? `★ wavelens.runsDir = ${o.set} (${where}): the runs of this dump are kept in ${m.dir}, the other dumps' by the same ` +
       `setting${on ? '' : ' — still set there'}` : `wavelens.runsDir cleared: the runs beside each dump again (.wavelens-runs)` +
       `${moved ? `, here ${m.dir}; the ones of before stay in ${was}` : ''}`);
@@ -11100,7 +11323,7 @@ Object.assign(WaveView.prototype, {
     if (h && h.cancel) Promise.resolve().then(() => h.cancel()).catch(() => {});
   },
   // ]r [r: B, the next (older) / previous (newer) run of the list (read again: a run kept in a shell is there), A not among
-  // them; ]w [w: A, the waves shown, through now and the runs (wrapping), B compared with each, if one is chosen
+  // them; ]w [w: A, the waves shown, through now and the runs (wrapping), B stays picked (Compare compares it with each)
   async runStep(dir, what = 'b') {
     if (!this.runsHost()) { this.toast(`]${what === 'a' ? 'w' : 'r'}: the runs kept are VS Code's (the Runs panel)`); return this; }
     let runs; try { runs = await this.runsList(true); } catch (e) { this.toast('runs: ' + e.message); return this; }
@@ -11115,7 +11338,8 @@ Object.assign(WaveView.prototype, {
       this.runsTried = next;
       return this.runsShow(next);
     }
-    const ids = [...runs.map(r => r.id), ...(a ? [0] : [])].filter(x => x !== a);   // A a run: now is a B too (the panel's row)
+    // A a run (or one picked as A, B-13): now is a B too (the panel's row); the A of the compare to come is never a B
+    const pa = this.runPickA != null ? this.runPickA : a, ids = [...runs.map(r => r.id), ...(pa ? [0] : [])].filter(x => x !== pa);
     if (!ids.length) {
       this.toast(runs.length ? 'the one run kept is A, the waves shown: ]w back to now' : 'no run kept: Keep this dump… in the Runs panel (gu)');
       return this; }
@@ -11126,7 +11350,7 @@ Object.assign(WaveView.prototype, {
   },
   // A: a run's waves (0: the dump of now) read into this viewer by the host, the view kept — the window, rows, markers,
   // spans, the panels; the rows a run has not got come back on the next waves that have them (the snapshot: the view as it
-  // was on the last waves with all of its rows). B, if any, compared with the new A -> the viewer then
+  // was on the last waves with all of its rows). B, if any, stays picked (not compared: Compare does it) -> the viewer then
   async runsShow(id, quiet) {
     const h = this.runsHost();
     if (!h || !h.open) { this.toast('a run shown here: VS Code\'s Runs panel (an older extension: update it)'); return this; }
@@ -11140,7 +11364,7 @@ Object.assign(WaveView.prototype, {
     const name = this.runName(id);
     if (this.runsP) this.runsP.status(`reading ${name}…`);
     this.runsOpening = id;   // the run being read (the panel: the keys back on A meanwhile open A again)
-    let m; try { m = await h.open(id); } catch (e) { m = { error: e.message }; }
+    let m; try { m = await h.open(id, this.runsDir || undefined); } catch (e) { m = { error: e.message }; }
     if (stale()) return this.root.waveView || this;
     this.runsOpening = null;
     if (m.error || !m.file) return say(`${name}: ${m.error || 'not read'}${this.runsTried === id ? ' (]w goes on)' : ''}`);
@@ -11158,9 +11382,10 @@ Object.assign(WaveView.prototype, {
   runsKeep() {
     const move = (this.runsTo !== undefined ? this.runsTo : 0) !== this.runsA();
     const st = move ? JSON.parse(JSON.stringify(this.runsSnapTake())) : this.state();
-    // the compare of the A of before (or of these waves before they were read again): not taken over, its B picked again (runsAgain)
+    // the compare of the A of before (or of these waves before they were read again): not taken over — of other waves now, a
+    // result given whole too (B-02); its B picked again (runsAgain, openDump), or its going said (openDump)
     // (null, not left out: the viewer may be this one, its compare would stay)
-    if (move || this.runCur != null || (this.cmp && this.cmp.result && this.cmp.result.src)) { st.compare = null; delete st.compareShow; }
+    st.compare = null; delete st.compareShow;
     // a slice's times are from 0: from a whole one (the dump, a whole run) to a slice and back the times of the view go with
     // it — the same place of the dump in sight, your markers on the same moments; slice to slice: both from 0, as they compare
     const d = move ? this.runsShift() : 0;
@@ -11194,12 +11419,14 @@ Object.assign(WaveView.prototype, {
     const res = this.cmp && this.runCur == null ? this.cmp.result : null, file = res ? { name: this.cmp.name || res.name || 'B',
       path: res.src && typeof res.src.path === 'string' ? res.src.path : null } : this.cmpPick && this.cmpPick.path ? { name: this.cmpPick.name,
       path: this.cmpPick.path } : null, filePick = !res && !!file;   // (a file picked, not compared yet: picked again over the next waves)
-    if (!this.runsP && this.runCur == null && this.runPickB == null && !this.runsWin && !this.runsA() && !to && !file && !this.runsGoAfter) return null;
+    if (!this.runsP && this.runCur == null && this.runPickB == null && this.runPickA == null && !this.runsWin && !this.runsA() && !to && !file &&
+      !this.runsGoAfter) return null;
     // the window and its end in the time of the waves asked (a slice's from 0), as runsKeep moved the spans
     const d = this.runsShift(), w = this.runsWin && d ? Object.assign({}, this.runsWin, { from: this.runsWin.from + d, to: this.runsWin.to + d })
       : this.runsWin;
     const go = !!this.runsGoAfter; this.runsGoAfter = false;
     return { open: !!this.runsP, win: w, cur: this.runCur, show: this.cmp ? this.cmpRun : null, shown: to, was: this.runsA(), go, pickB: this.runsB(), filePick,
+      pickA: this.runPickA,   // a run picked as A stays picked over the dump read again (⟳; B-23)
       wasName: this.runName(this.runsA()),
       aOf: to ? { origin: this.runOrigin(to), name: this.runName(to) } : null,   // A's slice origin and name, kept while it is A
       to: this.t0 + this.span + d, focus: !!this.runsP && this.runsP.el.contains(document.activeElement), file,
@@ -11223,8 +11450,11 @@ Object.assign(WaveView.prototype, {
     else if (o.shown) this.runsSaid(o);
     // B stays picked (B made A: none); compared again only when Compare asked for it (it opened this A), else Compare does it
     const b = o.pickB != null ? o.pickB : o.cur, pick = b === this.runsA() ? null : b;
+    if (o.pickA != null && o.pickA !== this.runsA() && !o.go) this.runPickA = o.pickA;
     if (o.file) this.runsFileAgain(o.file, o.go);
-    if (o.go) { if (pick != null) await this.runCompare(pick, true, o.show); else if (this.cmpPick) await this.compareGo(); }
+    if (o.go) { if (pick != null) await this.runCompare(pick, true, o.show); else if (this.cmpPick) await this.compareGo();
+      // the run that was B made A by Compare: nothing to compare it with now, said (B-12)
+      else if (b != null && this.runsP) this.runsP.status(`${this.runName(b)} is A now: no B (click a run, then Compare)`); }
     else if (pick != null) { this.runPickB = pick; this.cmpShow(); if (this.runsP) { this.runsP.render();
       this.runsP.status(`B ${this.runName(pick)} picked, not compared with this A · Compare (c, g=)`); } }
     else if (b != null && this.runsP) this.runsP.status(`${this.runName(b)} is A now: no B (click a run, then Compare)`);
@@ -11257,7 +11487,8 @@ Object.assign(WaveView.prototype, {
     if (this.runsMode === 'open') this.runsModeSet('compare', true);   // a B asked (]r [r): the panel compares again
     const a = this.runPickA != null ? this.runPickA : this.runsA();
     if (id === a) { say(id ? `#${id} is A: B is another run (or now)` : 'now is A: B is a run'); return this; }
-    this.runPickB = id === this.runCur ? null : id; this.cmpShow(); if (this.runsP) this.runsP.render();
+    // one B: this run, a file picked before it dropped (the later pick wins, B-08); the run compared: no pick, it is B
+    this.cmpPicked().b = id === this.runCur ? null : { run: id }; this.cmpShow(); if (this.runsP) this.runsP.render();
     say(`B ${this.runName(id)} picked · Compare (c, g=) compares it with A ${this.runName(a)} over the window in sight`); return this;
   },
   runsPickA(id, quiet) {
@@ -11265,14 +11496,28 @@ Object.assign(WaveView.prototype, {
     this.runPickA = id === this.runsA() ? null : id;
     if (this.runPickB === id) this.runPickB = null;
     this.cmpShow(); if (this.runsP) this.runsP.render();
+    // B is this run (the one compared): it is A with Compare, and there is no B then (B-12)
+    const b = this.runsB(), self = b != null && b === id;
     say(this.runPickA == null ? `A ${this.runName(id)}: the waves shown` : `A ${this.runName(id)} picked · Compare (c, g=) opens its waves (the view ` +
-      `kept) and compares${this.runsB() != null ? ` B ${this.runName(this.runsB())}` : ''} with it over the window in sight`); return this;
+      `kept)${self ? `; it is B now: no B then — pick another run as B` : ` and compares${b != null ? ` B ${this.runName(b)}` : ''} with it over the ` +
+      'window in sight'}`); return this;
   },
   // Compare with the runs: A opened first when another one is picked (its waves read, the view kept; the compare goes on
   // over the new waves: runsAgain), then B compared with A over the window in sight
+  // The go is pending over that open only (runsGoAfter, read by runsOf): an open that fails, or a newer one, leaves no go behind
+  // (the next ⟳ would compare unasked, B-09), and A stays picked
   async runsGo() {
     const a = this.runPickA, b = this.runsB();
-    if (a != null && a !== this.runsA()) { this.runsGoAfter = true; this.runPickA = null; await this.runsShow(a, true); return null; }
+    if (a != null && a !== this.runsA()) {
+      this.runsGoAfter = true; this.runPickA = null;
+      const asked = this.runsShow(a, true), tok = this.root.wlRunsAsk;
+      try { await asked; } finally {
+        if (VIEWS.has(this)) { this.runsGoAfter = false;   // the waves did not change: this viewer is still the one
+          if (tok === this.root.wlRunsAsk && this.runPickA == null && this.runsA() !== a) {
+            this.runPickA = a; this.cmpShow(); if (this.runsP) this.runsP.render(); } }
+      }
+      return null;
+    }
     this.runPickA = null;
     if (b == null) { const s = 'Compare: pick B first — a run (or now) in the Runs panel (gu), or Compare… a dump (gC)';
       this.toast(s); if (this.runsP) this.runsP.status(s); this.cmpShow(); return null; }
@@ -11351,8 +11596,8 @@ class Runs {
     this.el.querySelector('[data-a=mcmp]').setAttribute('aria-pressed', String(!open));
     this.el.querySelector('[data-a=mopen]').setAttribute('aria-pressed', String(open));
     if (this.v.runsL) this.render();
-    // quiet: what the line said stays, but a word about the mode of before
-    if (quiet && !this.saidMode) this.status(this.said);
+    // quiet: what the line said stays, but a word about the mode of before, or a compare dropped by it (a state's runsMode; B-23)
+    if (quiet && !this.saidMode && !dropped) this.status(this.said);
     else this.status(open ? `a row chosen opens its waves here, nothing compared${dropped ? ' (B dropped)' : ''} · o: Compare` :
       quiet ? '' : 'Compare: a row chosen is B (w: A), picked; c compares them over the window (o: Open)', true);
   }
@@ -11376,7 +11621,7 @@ class Runs {
   // the directory of the runs: its path (selectable text), where it comes from in its tooltip, ★ lit when the setting names it
   dir() {
     const v = this.v, d = v.runsDir || '', o = v.runsDirOf, h = v.runsHost(), p = this.dirEl.querySelector('.rp'), st = this.dirEl.querySelector('.rstar');
-    const scope = o && o.scope ? ` in the ${o.scope === 'user' ? 'user' : 'workspace'}'s settings` : '';
+    const scope = o && o.scope ? ` in the ${runsScope(o.scope)}'s settings` : '';
     this.dirEl.hidden = !d; p.textContent = d;
     p.title = `the directory of the runs: ${d}\n` + (!o ? '' : o.set ?
       `from the setting wavelens.runsDir (${o.set})${scope}` :
@@ -11451,7 +11696,8 @@ class Runs {
       `<span class="rtags">${tags}</span>${this.deltaHtml(r, f)}` +
       (sl ? '<button type="button" data-a="sp" aria-label="its span on the waves shown" ' +
         `title="Its span on the waves shown: the window and the range on ${esc(f(r.slice.from))} … ` +
-        `${esc(f(r.slice.to))} of the dump, in A's time (s) — Slice ▸ then takes the same piece of these waves">↔</button>` : '') + (r.now ? '' :
+        `${esc(f(r.slice.to))} of the dump, in A's time (s) — Range ▸ Keep as a slice then takes the same piece of these waves">↔</button>` : '') +
+        (r.now ? '' :
         '<button type="button" data-a="ed" title="Name, tags, comment (e)">✎</button>' +
         '<button type="button" data-a="rm" title="Remove the run and its file (Delete)">✕</button>') + '</span>' +
       `<span class="r2">${comment ? `<span class="rcm">${esc(comment)}</span>` : ''}<span class="rmt">${esc(this.metaOf(r, f))}</span></span></div>`;
@@ -11486,14 +11732,17 @@ class Runs {
     const d = run ? 0 : this.v.runOrigin(this.v.runsA()) || 0;
     const cases = this.v.spans.filter(s => s.label && caseName(s.label)).map(s => ({ label: s.label, from: s.from + d, to: s.to + d }));
     let m;
-    try { m = run ? await h.set(run.id, body) : await h.keep(cases.length ? Object.assign({ cases }, body) : body); } catch (e) { m = { error: e.message }; }
+    try { m = run ? await h.set(run.id, Object.assign({ dir: this.v.runsDir || undefined }, body)) :
+      await h.keep(cases.length ? Object.assign({ cases }, body) : body); }
+
+    catch (e) { m = { error: e.message }; }
     if (m.error) { this.status((run ? 'not saved: ' : 'not kept: ') + m.error); return; }
     await this.load(); if (!run && m.run) { this.fi = this.rowOf(m.run.id); this.render(); }
     this.status(run ? `#${run.id} saved` : m.run ? `kept as #${m.run.id} ${m.run.name}` : 'kept');
   }
   async remove(run) {
     if (run.now) { this.status('now is the dump on the disk: not a run'); return; }
-    let m; try { m = await this.v.runsHost().rm(run.id); } catch (e) { m = { error: e.message }; }
+    let m; try { m = await this.v.runsHost().rm(run.id, this.v.runsDir || undefined); } catch (e) { m = { error: e.message }; }
     if (m.error) { this.status('not removed: ' + m.error); return; }
     if (m.cancelled) return;
     const cur = this.v.runCur === run.id, shown = this.v.runsA() === run.id; this.v.runGone(run.id);
@@ -11507,7 +11756,8 @@ class Runs {
     const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!cn && (v.runsL || []).some(r => (r.cases || []).some(c => c.name === cn));
     const over = byCase ? `the case ${cn}` : `${f(w.from)} … ${f(w.to)}`;
     this.status(`each run against A ${v.runName(a)} over ${over}…`);
-    let m; try { m = await v.runsHost().diff(Object.assign({ signals: v.runsSignals(), from: w.from, to: w.to, against: a }, byCase ? { case: cn } : {})); }
+    let m; try { m = await v.runsHost().diff(Object.assign({ signals: v.runsSignals(), from: w.from, to: w.to, against: a, dir: v.runsDir || undefined },
+      byCase ? { case: cn } : {})); }
     catch (e) { m = { error: e.message }; }
     if (m.error) { this.status('Δ all: ' + m.error); return; }
     let n = 0;
@@ -11542,7 +11792,14 @@ class Runs {
   // no B: the compare dropped, the waves only
   noB() { clearTimeout(this.settle); this.v.runsDrop(); this.v.runPickB = null; if (this.v.runCur != null) this.v.compare(null); else this.v.cmpShow();
     this.render(); this.status('no B: the waves only (]w [w walk the runs)'); }
-  // what the Open mode has not got (Δ all, ⟳, no B: the compare's)
+  // a click on a lit B: a run only picked while another is compared — the pick dropped, the compare stays (B-11); else no B
+  dropB(id) {
+    const v = this.v;
+    if (v.runPickB === id && v.runCur != null && v.runCur !== id) { v.runPickB = null; v.cmpShow(); this.render();
+      this.status(`B ${v.runName(id)} picked no more: the compare with ${v.runName(v.runCur)} stays`); return; }
+    this.noB();
+  }
+  // what the Open mode has not got (Δ all, Compare, no B: the compare's)
   onlyCompare(what) { if (this.v.runsMode !== 'open') return false; this.status(`${what} is the Compare mode's (o)`); return true; }
   events() {
     const v = this.v, el = this.el, sig = { signal: this.ac.signal };
@@ -11563,7 +11820,7 @@ class Runs {
         else if (a === 'ed' && run) this.openForm(run);
         else if (a === 'rm' && run) this.remove(run);
         else if (a === 'ra' && run) { this.fi = +row.dataset.i; if (v.runsMode === 'open') v.runsShow(run.id); else v.runsPickA(run.id, true); }
-        else if (a === 'rb' && run) { if (v.runsB() === run.id) this.noB(); else this.pick(+row.dataset.i); }
+        else if (a === 'rb' && run) { if (v.runsB() === run.id) this.dropB(run.id); else this.pick(+row.dataset.i); }
         return;
       }
       if (row) this.pick(+row.dataset.i);
@@ -12075,7 +12332,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.62',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.63',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

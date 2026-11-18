@@ -912,7 +912,8 @@ def compare_of(a, doc, t_from, t_to):
     c = a.compare
     bad = sorted(set(c) - set(COMPARE_KEYS))
     if bad:
-        raise WaveError(f'vcd2wavedrom: "compare": unknown key(s) {", ".join(bad)} (have: {", ".join(COMPARE_KEYS)})')
+        raise WaveError(f'vcd2wavedrom: "compare": unknown key(s) {", ".join(bad)} (have: {", ".join(COMPARE_KEYS)})'
+                        + ('; the red mask is the setting compareMask of "config"' if 'mask' in bad else ''))
     if c.get('show') not in (None, 'a', 'b', 'overlay'):
         raise WaveError(f'vcd2wavedrom: "compare": show is a, b or overlay, not "{c["show"]}"')
     if a.clock:
@@ -1481,6 +1482,9 @@ def lint(doc, a, where=None):
             out.append(f'bind-unknown: {at}bind: {note[6:]}')
     labels = [x['label'] for f in sva.get('files') or [] for x in (f.get('parsed') or {}).get('assertions', [])]
     show = (doc.get('config') or {}).get('svaShow')
+    # (a text of the panel's search, "apb_* !is:cover": sva.js QUERY_LIKE, its words are not names; the page says its errors)
+    if isinstance(show, str) and re.search(r'(^|[\s,])(!|@|in:|is:)|[^\s,]\s+[^\s,]', show.strip(), re.I):
+        show = None
     if show is not None and labels:
         for name in (show if isinstance(show, list) else str(show).split(',')):
             name = str(name).strip()

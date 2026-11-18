@@ -823,6 +823,10 @@ class Lint(unittest.TestCase):
         self.assertEqual([x.split(':')[0] for x in w], ['bind-unknown', 'bind-unknown', 'svashow-no-match'])
         self.assertIn('"zz" is no assertion of the files (have: a1, a2)', w[2])
         self.assertEqual(self.codes(sva=sva | {'notes': []}, config={'svaShow': 'a1, a2'}), [])
+        # a text of the panel's search (sva.js): its words are no names, nothing said of them; a list stays names
+        self.assertEqual(self.codes(sva=sva | {'notes': []}, config={'svaShow': 'zz* !is:cover'}), [])
+        self.assertEqual(self.codes(sva=sva | {'notes': []}, config={'svaShow': '@PREADY'}), [])
+        self.assertEqual(self.codes(sva=sva | {'notes': []}, config={'svaShow': ['@PREADY']}), ['svashow-no-match'])
 
     def test_close_circles_on_one_row(self):
         bms = [{'n': 1, 't': 1000, 'signal': 'clk'}, {'n': 2, 't': 5000, 'signal': 'clk'}]

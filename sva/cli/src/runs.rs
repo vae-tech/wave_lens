@@ -37,7 +37,7 @@ and their FSTs. path: the FST's path (for sva diff, sva vcd). diff: DUMP (A) aga
 --run, as sva diff over the window --from … --to (default: the time both cover), the signals of --signals /
 --signals-from (- stdin; default every one of DUMP the run has): per run how many signals differ, the first difference,
 the signals that differ (--limit, default 20, 0 all), the signals of one side only; a run that does not cover the window
-is \"not in this window\". --json: the result as JSON (times in ps). --opt=value is taken as --opt value. keep writes the
+is \"not in this window\". --json: the result as JSON (times in ps). An option's value may follow an = (--name=N); --tag is --tags. keep writes the
 dump's time on the disk too (source_mtime); a line of the list says \"of a dump of HH:MM\" when it is not the time kept.
 --against RUN: A is that run's FST, not DUMP (now, or none: DUMP), against the other runs of DUMP and DUMP itself (now), or
 the ones of --run (the run that is A, named in --run, is skipped and said); the window is in A's time. --run now: DUMP itself as a B (with

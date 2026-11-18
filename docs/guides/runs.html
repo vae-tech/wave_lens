@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs: keep, browse, compare, slice · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html" aria-current="page">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html">Keys</a>
+  <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Runs: keep, browse, compare, slice</h1>
+<p class="lead">A simulator writes its dump over the last one: once you run again, the run before is gone. In VS Code the
+  <b>Runs panel</b> keeps the runs you want to look back at, by hand, with a name, tags and a comment; it shows any of them in the
+  tab with your view kept, compares two of them over the window in sight, and cuts a piece of the waves out as a run of its own
+  (a <i>slice</i>) to compare it with another piece.</p></header>
+
+<h2 id="example">The example</h2>
+<p>The pictures are of a VS Code tab of the APB example (<code>make examples</code>, <code>apb.vcd</code>) with three runs kept, made
+  by <code>tests/guide_shots.py</code> with the real <code>sva runs</code>:</p>
+<ul>
+  <li><b>#1 golden</b> (tag <code>base</code>) and <b>#2 nightly</b> (tag <code>ci</code>): the example's dump as it is;</li>
+  <li><b>#3 slave rework</b> (tag <code>wip</code>): run B of <a href="compare.html#example">the compare guide</a> — the read at 115 ns
+    returns <code>0xDEADBEEF</code>, <code>PREADY</code> of the write at 155 ns comes 10 ns later, <code>PSLVERR</code> is not in the dump.</li>
+</ul>
+<p>The dump on the disk (<b>now</b>) is the rework's: the simulation after the change. The question the panel answers: what
+  changed since the golden run, and which run was the first to change.</p>
+
+<h2 id="open">The panel</h2>
+<p><span class="ui">Runs…</span> in the bar's <b>File ▾</b> (<kbd>g</kbd> <kbd>u</kbd>), the command <i>WaveLens: The runs kept of this
+  dump</i>, or its icon in the tab's title opens it. It belongs to the tab: a page in a browser has no Runs panel (the toast says so;
+  in a shell the same runs are <code>sva runs</code>, <a href="#shell">below</a>). The panel moves by its header and sizes by its corner,
+  as the Modules panel does; <kbd>Esc</kbd> closes it.</p>
+<figure><img src="img/runs-panel.png" alt="The Runs panel over the waves: now, #3 slave rework, #2 nightly, #1 golden, each with its tags and comment" loading="lazy">
+  <figcaption><b>The list.</b> <b>now</b> first (the dump on the disk, its time and size), then the runs kept, newest first. A is lit
+  on <b>now</b>: the waves shown are the dump's. The last line is the runs' directory.</figcaption></figure>
+<p>Each row has two lines:</p>
+<ul>
+  <li>The first: the letters <b>A</b> and <b>B</b> (buttons, lit on the row that has the role), the run's number, its name and its tags.
+    A name that is only the dump's (what a keep without a name gives) is muted: it does not tell the runs apart. Each tag has a
+    colour of its own, made from its text: the same tag has the same colour on every row, every day.</li>
+  <li>The second: the comment's first line in the text's colour (the whole comment in the row's tooltip), then, muted, what the run
+    is — when it was kept (and <i>of a dump of 12:03</i> when the dump was older than the keep), its size, its test cases, a slice's
+    times.</li>
+</ul>
+<p>On the right of a run's row: <span class="ui">✎</span> (<kbd>e</kbd>) changes its name, tags and comment; <span class="ui">✕</span>
+  (<kbd>Delete</kbd>) removes the run and its file, after VS Code asks. The panel's header counts the runs of other dumps when the
+  directory is shared (<a href="#dir">below</a>). A run kept meanwhile in a shell or by an agent shows up at once
+  (<code>runs.json</code> is watched).</p>
+
+<h2 id="keep">Keep this dump…</h2>
+<figure><img src="img/runs-keep.png" alt="The form of Keep this dump…: name, tags, comment, and Keep" loading="lazy">
+  <figcaption><b>Keep this dump…</b> (<kbd>k</kbd>): a name (the dump's file name by default), tags with a comma between them, a
+  comment. <span class="ui">Keep</span> keeps the dump as it is on the disk now.</figcaption></figure>
+<p>The dump goes into the runs' directory — <code>.wavelens-runs</code> beside the dump unless <a href="#dir">set otherwise</a> — as an
+  FST: a VCD converted as <code>sva fst</code> converts it (the FSM state names of <code>tb.types.json</code> beside it kept), an FST
+  copied. The run is listed in <code>runs.json</code> there. A directory the keep made, or one named <code>.wavelens-runs</code>, gets a
+  <code>.gitignore</code> of <code>*</code>, so git leaves the runs out. A VCD is written in blocks of 1 MiB of changes: a window late in
+  a long run reads the blocks from there on, as fast as a window at its start.</p>
+<p>Your spans with a label go with the run as its <a href="#cases">test cases</a>; with none, the cocotb marks beside the dump
+  (<code>wavelens.marks.json</code>) do.</p>
+
+<h2 id="compare">Compare: pick A and B, then Compare</h2>
+<p>Two rows have a role. <b>A</b> is the waves shown in the tab — <b>now</b> at first. <b>B</b> is the run compared with A. Choosing a row
+  only <b>picks</b> it; nothing is read until you press <span class="ui">Compare</span>.</p>
+<ol class="steps">
+  <li>Click a run (or <kbd>Enter</kbd> on it, or move with <kbd>↑</kbd> <kbd>↓</kbd> in the list): it is picked as B, its letter in a dashed
+    box. The bar shows <span class="ui">B: #1 golden ✕</span> and lights <span class="ui">Compare</span>. Anywhere on the waves,
+    <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> pick the next (older) / previous run as B, with the panel open or not.</li>
+  <li>Choose the window in <span class="ui">over</span>: <i>the waves in sight</i>, or one of your spans (a test case's spans among them).</li>
+  <li><span class="ui">Compare</span> — the panel's, the bar's, <kbd>c</kbd> in the list or <kbd>g</kbd> <kbd>=</kbd> — compares A with B over
+    that window. Only that window of the two is read: <code>sva runs diff</code> on the host, then B's values of the signals that differ
+    there (at most 32 MB). A run of gigabytes costs its window, not its size.</li>
+</ol>
+<figure><img src="img/runs-picked.png" alt="#1 golden picked as B: its B in a dashed box, Compare lit in the panel and in the bar, B: #1 golden in the bar" loading="lazy">
+  <figcaption><b>Picked, not compared.</b> <b>#1 golden</b> is B (the dashed box), the status line says what Compare will do.</figcaption></figure>
+<figure><img src="img/runs-compared.png" alt="After Compare: PRDATA and PREADY marked ≠ with red bands at 115 ns and 155 ns, the status line A now ≠ B #1 golden: 6 of 58 signals differ" loading="lazy">
+  <figcaption><b>Compared.</b> The status line: <i>A now ≠ B #1 golden: 6 of 58 signals differ over 40.0 ns … 200.0 ns, the first at
+  115.0 ns</i>; the same numbers on B's row. On the waves it is a compare as <span class="ui">Compare…</span> makes one: red
+  bands, ≠ on the names, the log line says which signal differed first.</figcaption></figure>
+<p>From here everything of <a href="compare.html#read">the compare guide</a> works: <kbd>]d</kbd> <kbd>[d</kbd> to the next difference,
+  <kbd>d</kbd> flips the waves between A and B, <kbd>D</kbd> both over each other, <span class="ui">▒</span> (<kbd>gb</kbd>) the red mask
+  off and on. The view you chose (B, A+B) stays from one run to the next.</p>
+<ul>
+  <li><b>The window moved.</b> Zoom or pan and nothing is compared again: the bands stay those of their window, the time outside it
+    shaded, and <span class="ui">Compare</span> is lit until you press it again.</li>
+  <li><b>No B.</b> <span class="ui">no B</span> (<kbd>x</kbd>), the bar's <span class="ui">✕</span>, or a click on the lit B drops the
+    compare: the waves only. A click on a B that is only picked while another run is compared drops the pick and keeps the compare.</li>
+  <li><b>A run as A.</b> <kbd>w</kbd> on a row (or its <span class="ui">A</span>) picks it as A. <span class="ui">Compare</span> then
+    reads that run's waves into the tab — the window, the rows and their order, colours, groups, markers, spans and panels kept —
+    and compares B with it. Two kept runs are compared with each other this way; <b>now</b> can be B while A is a run.</li>
+  <li><b>A new simulation.</b> The dump read again (⟳, <kbd>R</kbd>) is <b>now</b>, and A is now again. The panel stays open and B stays
+    picked: <span class="ui">Compare</span> compares the new dump with it.</li>
+</ul>
+
+<h3 id="delta">Δ all: which run differs</h3>
+<p><span class="ui">Δ all</span> (<kbd>a</kbd>) asks every run at once: how many signals differ from A in the window, and the first
+  difference, on each run's row.</p>
+<figure><img src="img/runs-delta-all.png" alt="Δ all: #3 slave rework = equal, #2 nightly and #1 golden ≠ 6 of 58 at 115.0 ns" loading="lazy">
+  <figcaption><b>Δ all against now.</b> <b>#3</b> is equal to the dump of now; <b>#2</b> and <b>#1</b> differ from 115 ns on: the
+  change came between the nightly run and the rework.</figcaption></figure>
+<p>Red: some signals differ; <i>= equal</i>: none; <i>not in this window</i>: the run does not cover it. Numbers of another window or
+  another A than the one now are greyed, with their window in their text. To ask "which run left the golden behaviour", make the
+  golden run A first (<kbd>w</kbd>, Compare), then Δ all.</p>
+
+<h2 id="browse">Open: looking through the runs</h2>
+<p>To look through the runs one after another without comparing, switch the panel from <span class="ui">Compare</span> to
+  <span class="ui">Open</span> (<kbd>o</kbd> in the list). A row chosen — a click, <kbd>Enter</kbd>, its <span class="ui">A</span> — opens its
+  waves in the tab, the view kept as <kbd>w</kbd> keeps it. Nothing is compared: B, Δ all and the compare's tools are gone, the B of
+  before is dropped, and the status line starts with <i>Open ·</i>.</p>
+<figure><img src="img/runs-open.png" alt="The Open mode: #2 nightly shown, A on its row, A · #2 nightly on the time axis, the panel without B" loading="lazy">
+  <figcaption><b>Open mode.</b> <b>#2 nightly</b> is shown: A on its row, <i>A · #2 nightly</i> on the time axis and in the title,
+  the same window as before. It has <code>PSLVERR</code>, which the dump of now has not: the row is back.</figcaption></figure>
+<ul>
+  <li><kbd>↑</kbd> <kbd>↓</kbd> (<kbd>Home</kbd> <kbd>End</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd>) held down open only the row they rest on,
+    0.6 s after they stop: each run is a read of its file.</li>
+  <li><kbd>]</kbd> <kbd>w</kbd> / <kbd>[</kbd> <kbd>w</kbd> anywhere, in either mode, open the next / previous one at once: now, then the
+    runs, round again. A picked B stays picked meanwhile.</li>
+  <li>A run without a row of yours (a signal added since) says which; the row comes back, with its colour, radix and place in your
+    groups, on the next waves that have it. A run shorter than the window says where it ends.</li>
+  <li>The mode is kept with the view (<code>runsMode</code> in a saved state); <kbd>]r</kbd> <kbd>[r</kbd> (a B asked) switch back to
+    Compare.</li>
+</ul>
+
+<h2 id="cases">Test cases</h2>
+<p>A run keeps its test cases, a name and a window each: your spans with a label when it was kept, else cocotb's
+  <code>wavelens.marks.json</code> beside the dump (<a href="cocotb.html">cocotb tests</a>). The row says how many
+  (<i>5 cases</i>).</p>
+<p>Choose one of your spans in <span class="ui">over</span> whose label is the name of a case (the choice says <i>· a case</i>; the
+  <code>TC3 </code> before a cocotb label and the <code> · PASS</code> after it do not count): each run is then compared over <i>its</i> case
+  of that name, wherever it is in the run — the cases before it may have taken longer — over the shorter of the two, said in the status.
+  In Δ all a run without that case has an error on its row; Compare of such a run compares over the span as it is and says
+  <i>no case … in it</i>. In the shell:
+  <code>sva runs diff tb.vcd --case test_burst</code>.</p>
+
+<h2 id="slices">Slices: two pieces of the waves compared</h2>
+<p>A slice is a piece of the waves kept as a run of its own, <b>its times from 0</b>: its first sample is 0. Two slices — two bursts,
+  two packets, two calls of a task, of one run or of two — compare like two runs and line up on their first samples, so a
+  difference is a difference of behaviour, not of when it happened.</p>
+<ol class="steps">
+  <li>Make a range over the piece (<kbd>ctrl</kbd>+drag), then the right button over it: <span class="ui">Range ▸ Keep as a slice
+    (Runs)</span>. The slice is of the waves shown: the dump, or the run that is A.</li>
+  <li>The panel opens on its row: <i>slice 110.0 ns … 130.0 ns, from 0</i>, named <i>apb.vcd 110 ns–130 ns</i> until you rename it
+    (<span class="ui">✎</span>).</li>
+  <li>Compare it like any run: one slice A (<kbd>w</kbd>), the other B, Compare. A slice and a whole run (or the dump) compare at the
+    slice's place in it; the status says so (<i>B's 110 ns … 130 ns: a slice at its place</i>).</li>
+</ol>
+<figure><img src="img/runs-slice-menu.png" alt="The right button's menu over a range of PRDATA, Range ▸ open: Keep as a slice (Runs), Save as FST…" loading="lazy">
+  <figcaption><b>Range ▸</b> over a range: under <i>the range alone, its times from 0</i>, <span class="ui">Keep as a slice (Runs)</span>
+  and <span class="ui">Save as FST…</span> (the piece as an FST file where the save dialog says). Both are there in VS Code only.</figcaption></figure>
+<p><b>The same piece of another run.</b> <span class="ui">↔</span> on a slice's row (<kbd>s</kbd> in the list) puts the window and the
+  range of the waves shown on the slice's start and end — where it was cut from, in A's time. Show another run (A), press
+  <span class="ui">↔</span>, and <span class="ui">Range ▸ Keep as a slice</span> takes the same piece of that run. A span past an end of A is
+  cut to A; one wholly outside A is said and not applied.</p>
+<figure><img src="img/runs-slice-span.png" alt="#1 golden shown, the slice's span applied: the window and the range on 110 ns … 130 ns, the status line saying so" loading="lazy">
+  <figcaption><b>↔ on #4.</b> With <b>#1 golden</b> shown, the window and the range are 110 ns … 130 ns, the place #4 was cut from in the
+  dump of now; <span class="ui">Range ▸ Keep as a slice</span> now cuts golden's same piece.</figcaption></figure>
+<p>While a slice is A, the view's times go with it: from the dump to its slice the window, the cursor, markers, bookmarks and spans
+  move by the slice's start, and back again on the way out (slice to slice: both from 0, nothing moves).</p>
+
+<h2 id="dir">The runs' directory and ★</h2>
+<p>The panel's last line is the directory the runs of this dump are in; its path can be selected, <span class="ui">Copy</span> copies it,
+  its tooltip says where it comes from.</p>
+<ul>
+  <li>By default: <code>.wavelens-runs</code> beside the dump.</li>
+  <li>The setting <code>wavelens.runsDir</code>: another directory, relative to the workspace folder or absolute; <code>~</code> and
+    <code>${userHome}</code> are your home, <code>${workspaceFolder}</code> the dump's workspace folder. A folder of yours without a
+    <code>.gitignore</code> gets one of the runs' files only (<code>*.fst</code>, <code>*.part</code>, <code>runs.json*</code>). One
+    directory for every dump lists this dump's runs and counts the others in the header.</li>
+  <li><span class="ui">★</span> writes that setting with the directory of now — in the workspace's settings when the dump is in a
+    workspace folder, else in yours — so the dumps opened later keep their runs there too. A lit ★ means the setting names it; a click
+    on it clears the setting (the runs kept stay where they are).</li>
+</ul>
+<figure><img src="img/runs-dir.png" alt="The panel after ★: the status line wavelens.runsDir = .wavelens-runs (the workspace's settings), the ★ lit on the last line" loading="lazy">
+  <figcaption><b>★ lit.</b> The status line says what was written and where.</figcaption></figure>
+<p>When the directory changes under an open tab (a ★ in another tab, the setting edited), its runs are others: that tab drops its
+  compare with a run, its picks and the Δ numbers, shows the dump of now if a run was shown, and says so.</p>
+
+<h2 id="keys">The panel's keys</h2>
+<table>
+  <tr><th>Key</th><th>In the list</th></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>go through the rows: pick
+    one as B (Open: open the row they rest on)</td></tr>
+  <tr><td><kbd>Enter</kbd></td><td>pick the row as B (Open: open it)</td></tr>
+  <tr><td><kbd>w</kbd></td><td>pick the row as A (Open: open it)</td></tr>
+  <tr><td><kbd>c</kbd></td><td>Compare: A opened when another is picked, then A and B compared over the window</td></tr>
+  <tr><td><kbd>a</kbd></td><td>Δ all</td></tr>
+  <tr><td><kbd>x</kbd></td><td>no B: the waves only</td></tr>
+  <tr><td><kbd>o</kbd></td><td>the mode: Compare or Open</td></tr>
+  <tr><td><kbd>s</kbd></td><td>a slice's span on the waves shown</td></tr>
+  <tr><td><kbd>k</kbd></td><td>Keep this dump…</td></tr>
+  <tr><td><kbd>e</kbd></td><td>the run's name, tags, comment</td></tr>
+  <tr><td><kbd>Delete</kbd></td><td>remove the run and its file (asked first)</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>close the form, else the panel</td></tr>
+</table>
+<p>On the waves: <kbd>g</kbd> <kbd>u</kbd> the panel, <kbd>g</kbd> <kbd>=</kbd> Compare, <kbd>]r</kbd> <kbd>[r</kbd> the next / previous
+  run as B, <kbd>]w</kbd> <kbd>[w</kbd> the next / previous run shown as A, and the compare's <kbd>]d</kbd> <kbd>[d</kbd> <kbd>d</kbd>
+  <kbd>D</kbd> <kbd>gb</kbd>.</p>
+
+<h2 id="shell">From the shell and for agents</h2>
+<p>The panel runs <code>sva runs</code> on the host; the same directory works from a terminal (VS Code's <code>wavelens.runsDir</code>
+  of the workspace folder above the dump is read too):</p>
+<pre>sva runs keep apb.vcd --name golden --tags base --comment "before the slave change"
+sva runs list apb.vcd
+sva runs diff apb.vcd --from 40ns --to 200ns --limit 2
+apb.vcd against 3 runs over 40 ns … 200 ns:
+  #3 slave rework: equal (58 signals)
+  #2 nightly: 6 of 58 signals differ, first at 115 ns (apb_tb.PRDATA); 3 of the run not in the dump
+      apb_tb.PREADY apb_tb.PRDATA … 4 more
+  #1 golden: 6 of 58 signals differ, first at 115 ns (apb_tb.PRDATA); 3 of the run not in the dump
+      apb_tb.PREADY apb_tb.PRDATA … 4 more</pre>
+<ul>
+  <li><code>sva runs diff DUMP --against golden</code>: a run is A instead of the dump; <code>--run now</code> adds the dump as a B;
+    <code>--case NAME</code> a test case; <code>--json</code> for scripts. Exit status 0 every run equal, 1 one differs.</li>
+  <li><code>sva runs keep DUMP --from 4us --to 6us</code> keeps a slice; <code>sva fst DUMP --from 4us --to 6us --zero --out burst.fst</code>
+    writes one as a file.</li>
+  <li><code>sva runs set RUN …</code>, <code>sva runs rm RUN</code>, <code>sva runs path RUN</code> (its FST, for <code>sva diff</code> and
+    <code>sva vcd</code>).</li>
+  <li>An agent has <code>wave_runs</code> (<a href="mcp.html">AI agents</a>): <code>list</code>, <code>keep</code>, <code>set</code>,
+    <code>rm</code>, <code>diff</code> with <code>case</code> and <code>against</code> — "which run first broke test_x" is one call.</li>
+</ul>
+<p>All the options: <a href="../USAGE.md">USAGE.md</a> § The runs kept of a dump and § The runs kept, in the shell.</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

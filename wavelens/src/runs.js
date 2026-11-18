@@ -55,10 +55,23 @@ const tagHue = t => {
 // a case's name of a span's label: without "TC3 " before it and " · PASS" after it (cocotb's marks); sva runs.rs case_name
 const caseName = l => { const s = String(l || '').split(' · ')[0].trim(), m = /^TC\d+ (.*)$/.exec(s); return (m ? m[1] : s).trim(); };
 const sameSpan = (s, w) => !!s && !!w && s.from === w.from && s.to === w.to && (s.label || '') === (w.label || '');
+// the settings that name the runs' directory, as said: the user's, the workspace's, a workspace folder's (dirOf.scope)
+const runsScope = s => (s === 'user' ? 'user' : s === 'folder' ? 'workspace folder' : 'workspace');
 // B: the run compared (its id; 0 the dump of now, while A is a run), the compare's own: dropped with it (✕, compare off,
 // Compare… with a file), kept with it in a saved state
 Object.defineProperty(WaveView.prototype, 'runCur', { configurable: true,
   get() { const c = this.cmp && this.cmp.result; return c && c.run != null && isFinite(c.run) ? +c.run : null; } });
+// the picks as three names (the one object is diff.js cmpPicked: A's id, and one B, a run or a file): runPickA, the run picked as
+// A; runPickB, the run picked as B; cmpPick, the file picked as B. Setting B of one kind replaces B of the other (the later pick
+// wins); null clears that kind only
+Object.defineProperty(WaveView.prototype, 'runPickA', { configurable: true,
+  get() { return this.cmpPicked().a; }, set(x) { this.cmpPicked().a = x ?? null; } });
+Object.defineProperty(WaveView.prototype, 'runPickB', { configurable: true,
+  get() { const b = this.cmpPicked().b; return b && b.run != null ? b.run : null; },
+  set(x) { const p = this.cmpPicked(); if (x != null) p.b = { run: x }; else if (p.b && p.b.run != null) p.b = null; } });
+Object.defineProperty(WaveView.prototype, 'cmpPick', { configurable: true,
+  get() { const b = this.cmpPicked().b; return b && b.file ? b.file : null; },
+  set(x) { const p = this.cmpPicked(); if (x) p.b = { file: x }; else if (p.b && p.b.file) p.b = null; } });
 Object.assign(WaveView.prototype, {
   // who keeps the runs: the page's host (VS Code), null in a browser
   runsHost() { return this.opts.runsHost || (typeof window !== 'undefined' && window.WAVELENS_RUNS) || null; },
@@ -99,8 +112,9 @@ Object.assign(WaveView.prototype, {
   },
   // the window a run is compared over: your span chosen (runsWin: its label, from and to — the span followed by what it is,
   // not by its place in the list), else the waves in sight; inside the page's time. A span gone: the waves in sight again (said)
+  // A page without a host has no Runs panel to show or change the span (a state's runsOver loaded there): the waves in sight (B-23)
   runsWindow() {
-    const { t0, t1 } = this.M, w = this.runsWin, s = w ? this.spans.find(x => sameSpan(x, w)) : null;
+    const { t0, t1 } = this.M, w = this.runsHost() ? this.runsWin : null, s = w ? this.spans.find(x => sameSpan(x, w)) : null;
     if (w && !s) { this.runsWin = null;
       if (this.runsP) { this.runsP.windows(); this.runsP.status(`the span ${w.label || ''} is gone: over the waves in sight`); } }
     const a = s ? s.from : this.t0, b = s ? s.to : this.t0 + this.span, from = Math.min(Math.max(a, t0), t1);
@@ -109,15 +123,32 @@ Object.assign(WaveView.prototype, {
   // the paths compared: the rows of the view, as Compare… sends them
   runsSignals() { return this.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full); },
   // the runs of this dump as the host lists them (newest first), read again when asked (the panel, ]r [r, runs.json changed);
-  // the dump of now with them (runsNow: its name, time and size on the disk)
+  // the dump of now with them (runsNow: its name, time and size on the disk). The directory another than the one before (a ★
+  // in any tab, the setting edited): runsMoved
   async runsList(again) {
     const h = this.runsHost(); if (!h) return [];
     if (!this.runsL || again) {
       const m = await h.list(); if (m.error) throw new Error(m.error);
+      const was = this.runsDir;
       this.runsL = (m.runs || []).slice().reverse(); this.runsDir = m.dir || ''; this.runsOthers = m.others || 0; this.runsNow = m.now || null;
       this.runsDirOf = m.dirOf || null;   // where the directory comes from: {set: the setting's text ('' the default), scope}
+      if (was && this.runsDir && was !== this.runsDir) this.runsMoved(was);
     }
     return this.runsL;
+  },
+  // the runs' directory moved under these waves (review 2026-11-18 V-01): its runs are others, their numbers too — the run
+  // compared, the picks of runs and Δ all's numbers dropped; a run shown as A: the dump of now shown again (its file is read,
+  // but no run of the new directory has that number). A file compared or picked stays (no run)
+  runsMoved(was) {
+    const b = this.runCur, a = this.runsA();
+    this.runsDrop(); this.runPickA = null; this.runPickB = null; this.runsTried = null;
+    if (b != null) this.compare(null); else this.cmpShow();
+    if (this.runsP) { this.runsP.deltas.clear(); this.runsP.render(); }
+    const s = `the runs' directory is now ${this.runsDir} (was ${was})${b != null ? `: the compare with ${this.runName(b)} dropped` : ''}` +
+      `${a ? `; ${this.runName(a)} was A: the dump of now shown again` : ''}`;
+    if (this.runsP) this.runsP.status(s);
+    this.log('info', s, { quiet: true });
+    if (a) this.runsShow(0, true);
   },
   // A compared with B (a run's id; 0: the dump of now, while A is a run) over the window: the view shown (A, B, A+B) kept;
   // a later ask wins (the host stops the one before). show: the view to show after it (a step of A: the one of before)
@@ -139,22 +170,27 @@ Object.assign(WaveView.prototype, {
     if (this.runsP) this.runsP.status(`comparing ${na} with ${nb} over ${what}…`);
     let m;
     this.runWait = req;
-    try { m = await h.compare(Object.assign({ id, against: a, signals: this.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
+    // dir: the directory the ids are of (the host refuses them when it moved meanwhile: V-01)
+    try { m = await h.compare(Object.assign({ id, against: a, signals: this.runsSignals(), from: w.from, to: w.to, dir: this.runsDir || undefined },
+      byCase ? { case: cn } : {})); }
     catch (e) { m = { error: e.message }; }
     if (this.runWait === req) this.runWait = 0;
     if (req !== this.runReq) return null;   // another run asked meanwhile, or B dropped or replaced (runsDrop)
     if (m.error || !m.result) { const e = m.error || 'no result'; this.toast(`${nb}: ${e}`); if (this.runsP) this.runsP.status(`${nb}: ${e}`);
       return null; }
-    Object.assign(m.result, { name: this.runName(id), run: id, a: a || null });   // B named, and both ids: the saved state has them
+    // B named, both ids and the window asked: the saved state has them (a compare of another A is not taken: setState), and
+    // Compare is lit by the window asked, not by the time the result covers (B-01)
+    const asked = { from: w.from, to: w.to };
+    Object.assign(m.result, { name: this.runName(id), run: id, a: a || null, asked });
     if (this.runPickB === id) this.runPickB = null; if (this.runPickA === a) this.runPickA = null;   // the picks are the compare now
-    const r = this.compareResult(m.result, quiet);
+    const r = this.compareResult(m.result, quiet, { asked });
     if (!r) return null;
     if (sh !== 'a' && this.cmpCan()) await this.compareView(sh, true);
     if (this.runsP) { this.runsP.got(id, w, r);
       this.runsP.status(runSaid(na, nb, r, m.result, w, f, this.cmpCan()) + (cn && !byCase && run && run.cases ? ` · no case ${cn} in it` : '')); }
     return r;
   },
-  // the panel's mode: 'compare' (a row chosen is B, compared with A) or 'open' (a row chosen opens its waves here, one run
+  // the panel's mode: 'compare' (a row chosen is picked as B, compared with A by Compare) or 'open' (a row chosen opens its waves here, one run
   // after another: no B, nothing compared — the B of before dropped); kept with the view's state (runsMode)
   runsModeSet(mode, quiet) {
     const m = mode === 'open' ? 'open' : 'compare', was = this.runsMode === 'open' ? 'open' : 'compare', b = this.runCur;
@@ -165,8 +201,9 @@ Object.assign(WaveView.prototype, {
     return this;
   },
   // a slice's span on the waves shown (A): the window and the range on the slice's start and end — its from … to in the time
-  // of the dump it was cut from, less A's origin when A is a slice itself (its times from 0) — so Slice ▸ takes the same
-  // piece of these waves. A span past an end of A: cut to A (said); wholly outside: said, not applied -> [from, to] or null
+  // of the dump it was cut from, less A's origin when A is a slice itself (its times from 0) — so Range ▸ Keep as a slice / Save
+  // as FST… takes the same piece of these waves. A span past an end of A: cut to A (said); wholly outside: said, not applied ->
+  // [from, to] or null
   runsSpan(id, quiet) {
     const say = s => { if (!quiet) this.toast(s); if (this.runsP) this.runsP.status(s); };
     const r = (this.runsL || []).find(x => x.id === id), s = r && r.slice, name = this.runName(id);
@@ -180,7 +217,7 @@ Object.assign(WaveView.prototype, {
       'not applied'); return null; }
     this.zoomTo(lo, hi); this.warpSync(); this.setRange(lo, hi);
     say(`the span of ${name} on A ${this.runName(a)}: the window and the range ${f(lo)} … ${f(hi)}${of}` +
-      `${lo > p || hi < q ? ` — cut to these waves (its ${f(p)} … ${f(q)})` : ''} · Slice ▸ takes this piece`);
+      `${lo > p || hi < q ? ` — cut to these waves (its ${f(p)} … ${f(q)})` : ''} · Range ▸ Keep as a slice (or Save as FST…) takes this piece`);
     return [lo, hi];
   },
   // ★: the directory of the runs made the permanent one (on false: no more) — the host writes the setting wavelens.runsDir
@@ -191,11 +228,9 @@ Object.assign(WaveView.prototype, {
     let m; try { m = await h.dir(!!on); } catch (e) { m = { error: e.message }; }
     if (m.error) return say(`the runs' directory: ${m.error}`);
     const o = m.dirOf || {}, was = this.runsDir, moved = m.dir !== was;
-    const where = o.scope ? `the ${o.scope === 'user' ? 'user' : 'workspace'}'s settings` : 'the settings';
-    // another directory: its runs are others (their numbers too) — no B, no Δ of before, the dump of now shown
-    if (moved) { this.runsDrop(); if (this.runCur != null) this.compare(null); if (this.runsP) this.runsP.deltas.clear(); }
+    const where = o.scope ? `the ${runsScope(o.scope)}'s settings` : 'the settings';
+    // another directory: its runs are others (their numbers too) — no B, no Δ of before, the dump of now shown (runsList: runsMoved)
     if (this.runsP) await this.runsP.load(); else await this.runsList(true).catch(() => {});
-    if (moved && this.runsA()) this.runsShow(0, true);
     return say(o.set ? `★ wavelens.runsDir = ${o.set} (${where}): the runs of this dump are kept in ${m.dir}, the other dumps' by the same ` +
       `setting${on ? '' : ' — still set there'}` : `wavelens.runsDir cleared: the runs beside each dump again (.wavelens-runs)` +
       `${moved ? `, here ${m.dir}; the ones of before stay in ${was}` : ''}`);
@@ -209,7 +244,7 @@ Object.assign(WaveView.prototype, {
     if (h && h.cancel) Promise.resolve().then(() => h.cancel()).catch(() => {});
   },
   // ]r [r: B, the next (older) / previous (newer) run of the list (read again: a run kept in a shell is there), A not among
-  // them; ]w [w: A, the waves shown, through now and the runs (wrapping), B compared with each, if one is chosen
+  // them; ]w [w: A, the waves shown, through now and the runs (wrapping), B stays picked (Compare compares it with each)
   async runStep(dir, what = 'b') {
     if (!this.runsHost()) { this.toast(`]${what === 'a' ? 'w' : 'r'}: the runs kept are VS Code's (the Runs panel)`); return this; }
     let runs; try { runs = await this.runsList(true); } catch (e) { this.toast('runs: ' + e.message); return this; }
@@ -224,7 +259,8 @@ Object.assign(WaveView.prototype, {
       this.runsTried = next;
       return this.runsShow(next);
     }
-    const ids = [...runs.map(r => r.id), ...(a ? [0] : [])].filter(x => x !== a);   // A a run: now is a B too (the panel's row)
+    // A a run (or one picked as A, B-13): now is a B too (the panel's row); the A of the compare to come is never a B
+    const pa = this.runPickA != null ? this.runPickA : a, ids = [...runs.map(r => r.id), ...(pa ? [0] : [])].filter(x => x !== pa);
     if (!ids.length) {
       this.toast(runs.length ? 'the one run kept is A, the waves shown: ]w back to now' : 'no run kept: Keep this dump… in the Runs panel (gu)');
       return this; }
@@ -235,7 +271,7 @@ Object.assign(WaveView.prototype, {
   },
   // A: a run's waves (0: the dump of now) read into this viewer by the host, the view kept — the window, rows, markers,
   // spans, the panels; the rows a run has not got come back on the next waves that have them (the snapshot: the view as it
-  // was on the last waves with all of its rows). B, if any, compared with the new A -> the viewer then
+  // was on the last waves with all of its rows). B, if any, stays picked (not compared: Compare does it) -> the viewer then
   async runsShow(id, quiet) {
     const h = this.runsHost();
     if (!h || !h.open) { this.toast('a run shown here: VS Code\'s Runs panel (an older extension: update it)'); return this; }
@@ -249,7 +285,7 @@ Object.assign(WaveView.prototype, {
     const name = this.runName(id);
     if (this.runsP) this.runsP.status(`reading ${name}…`);
     this.runsOpening = id;   // the run being read (the panel: the keys back on A meanwhile open A again)
-    let m; try { m = await h.open(id); } catch (e) { m = { error: e.message }; }
+    let m; try { m = await h.open(id, this.runsDir || undefined); } catch (e) { m = { error: e.message }; }
     if (stale()) return this.root.waveView || this;
     this.runsOpening = null;
     if (m.error || !m.file) return say(`${name}: ${m.error || 'not read'}${this.runsTried === id ? ' (]w goes on)' : ''}`);
@@ -267,9 +303,10 @@ Object.assign(WaveView.prototype, {
   runsKeep() {
     const move = (this.runsTo !== undefined ? this.runsTo : 0) !== this.runsA();
     const st = move ? JSON.parse(JSON.stringify(this.runsSnapTake())) : this.state();
-    // the compare of the A of before (or of these waves before they were read again): not taken over, its B picked again (runsAgain)
+    // the compare of the A of before (or of these waves before they were read again): not taken over — of other waves now, a
+    // result given whole too (B-02); its B picked again (runsAgain, openDump), or its going said (openDump)
     // (null, not left out: the viewer may be this one, its compare would stay)
-    if (move || this.runCur != null || (this.cmp && this.cmp.result && this.cmp.result.src)) { st.compare = null; delete st.compareShow; }
+    st.compare = null; delete st.compareShow;
     // a slice's times are from 0: from a whole one (the dump, a whole run) to a slice and back the times of the view go with
     // it — the same place of the dump in sight, your markers on the same moments; slice to slice: both from 0, as they compare
     const d = move ? this.runsShift() : 0;
@@ -303,12 +340,14 @@ Object.assign(WaveView.prototype, {
     const res = this.cmp && this.runCur == null ? this.cmp.result : null, file = res ? { name: this.cmp.name || res.name || 'B',
       path: res.src && typeof res.src.path === 'string' ? res.src.path : null } : this.cmpPick && this.cmpPick.path ? { name: this.cmpPick.name,
       path: this.cmpPick.path } : null, filePick = !res && !!file;   // (a file picked, not compared yet: picked again over the next waves)
-    if (!this.runsP && this.runCur == null && this.runPickB == null && !this.runsWin && !this.runsA() && !to && !file && !this.runsGoAfter) return null;
+    if (!this.runsP && this.runCur == null && this.runPickB == null && this.runPickA == null && !this.runsWin && !this.runsA() && !to && !file &&
+      !this.runsGoAfter) return null;
     // the window and its end in the time of the waves asked (a slice's from 0), as runsKeep moved the spans
     const d = this.runsShift(), w = this.runsWin && d ? Object.assign({}, this.runsWin, { from: this.runsWin.from + d, to: this.runsWin.to + d })
       : this.runsWin;
     const go = !!this.runsGoAfter; this.runsGoAfter = false;
     return { open: !!this.runsP, win: w, cur: this.runCur, show: this.cmp ? this.cmpRun : null, shown: to, was: this.runsA(), go, pickB: this.runsB(), filePick,
+      pickA: this.runPickA,   // a run picked as A stays picked over the dump read again (⟳; B-23)
       wasName: this.runName(this.runsA()),
       aOf: to ? { origin: this.runOrigin(to), name: this.runName(to) } : null,   // A's slice origin and name, kept while it is A
       to: this.t0 + this.span + d, focus: !!this.runsP && this.runsP.el.contains(document.activeElement), file,
@@ -332,8 +371,11 @@ Object.assign(WaveView.prototype, {
     else if (o.shown) this.runsSaid(o);
     // B stays picked (B made A: none); compared again only when Compare asked for it (it opened this A), else Compare does it
     const b = o.pickB != null ? o.pickB : o.cur, pick = b === this.runsA() ? null : b;
+    if (o.pickA != null && o.pickA !== this.runsA() && !o.go) this.runPickA = o.pickA;
     if (o.file) this.runsFileAgain(o.file, o.go);
-    if (o.go) { if (pick != null) await this.runCompare(pick, true, o.show); else if (this.cmpPick) await this.compareGo(); }
+    if (o.go) { if (pick != null) await this.runCompare(pick, true, o.show); else if (this.cmpPick) await this.compareGo();
+      // the run that was B made A by Compare: nothing to compare it with now, said (B-12)
+      else if (b != null && this.runsP) this.runsP.status(`${this.runName(b)} is A now: no B (click a run, then Compare)`); }
     else if (pick != null) { this.runPickB = pick; this.cmpShow(); if (this.runsP) { this.runsP.render();
       this.runsP.status(`B ${this.runName(pick)} picked, not compared with this A · Compare (c, g=)`); } }
     else if (b != null && this.runsP) this.runsP.status(`${this.runName(b)} is A now: no B (click a run, then Compare)`);
@@ -366,7 +408,8 @@ Object.assign(WaveView.prototype, {
     if (this.runsMode === 'open') this.runsModeSet('compare', true);   // a B asked (]r [r): the panel compares again
     const a = this.runPickA != null ? this.runPickA : this.runsA();
     if (id === a) { say(id ? `#${id} is A: B is another run (or now)` : 'now is A: B is a run'); return this; }
-    this.runPickB = id === this.runCur ? null : id; this.cmpShow(); if (this.runsP) this.runsP.render();
+    // one B: this run, a file picked before it dropped (the later pick wins, B-08); the run compared: no pick, it is B
+    this.cmpPicked().b = id === this.runCur ? null : { run: id }; this.cmpShow(); if (this.runsP) this.runsP.render();
     say(`B ${this.runName(id)} picked · Compare (c, g=) compares it with A ${this.runName(a)} over the window in sight`); return this;
   },
   runsPickA(id, quiet) {
@@ -374,14 +417,28 @@ Object.assign(WaveView.prototype, {
     this.runPickA = id === this.runsA() ? null : id;
     if (this.runPickB === id) this.runPickB = null;
     this.cmpShow(); if (this.runsP) this.runsP.render();
+    // B is this run (the one compared): it is A with Compare, and there is no B then (B-12)
+    const b = this.runsB(), self = b != null && b === id;
     say(this.runPickA == null ? `A ${this.runName(id)}: the waves shown` : `A ${this.runName(id)} picked · Compare (c, g=) opens its waves (the view ` +
-      `kept) and compares${this.runsB() != null ? ` B ${this.runName(this.runsB())}` : ''} with it over the window in sight`); return this;
+      `kept)${self ? `; it is B now: no B then — pick another run as B` : ` and compares${b != null ? ` B ${this.runName(b)}` : ''} with it over the ` +
+      'window in sight'}`); return this;
   },
   // Compare with the runs: A opened first when another one is picked (its waves read, the view kept; the compare goes on
   // over the new waves: runsAgain), then B compared with A over the window in sight
+  // The go is pending over that open only (runsGoAfter, read by runsOf): an open that fails, or a newer one, leaves no go behind
+  // (the next ⟳ would compare unasked, B-09), and A stays picked
   async runsGo() {
     const a = this.runPickA, b = this.runsB();
-    if (a != null && a !== this.runsA()) { this.runsGoAfter = true; this.runPickA = null; await this.runsShow(a, true); return null; }
+    if (a != null && a !== this.runsA()) {
+      this.runsGoAfter = true; this.runPickA = null;
+      const asked = this.runsShow(a, true), tok = this.root.wlRunsAsk;
+      try { await asked; } finally {
+        if (VIEWS.has(this)) { this.runsGoAfter = false;   // the waves did not change: this viewer is still the one
+          if (tok === this.root.wlRunsAsk && this.runPickA == null && this.runsA() !== a) {
+            this.runPickA = a; this.cmpShow(); if (this.runsP) this.runsP.render(); } }
+      }
+      return null;
+    }
     this.runPickA = null;
     if (b == null) { const s = 'Compare: pick B first — a run (or now) in the Runs panel (gu), or Compare… a dump (gC)';
       this.toast(s); if (this.runsP) this.runsP.status(s); this.cmpShow(); return null; }
@@ -460,8 +517,8 @@ class Runs {
     this.el.querySelector('[data-a=mcmp]').setAttribute('aria-pressed', String(!open));
     this.el.querySelector('[data-a=mopen]').setAttribute('aria-pressed', String(open));
     if (this.v.runsL) this.render();
-    // quiet: what the line said stays, but a word about the mode of before
-    if (quiet && !this.saidMode) this.status(this.said);
+    // quiet: what the line said stays, but a word about the mode of before, or a compare dropped by it (a state's runsMode; B-23)
+    if (quiet && !this.saidMode && !dropped) this.status(this.said);
     else this.status(open ? `a row chosen opens its waves here, nothing compared${dropped ? ' (B dropped)' : ''} · o: Compare` :
       quiet ? '' : 'Compare: a row chosen is B (w: A), picked; c compares them over the window (o: Open)', true);
   }
@@ -485,7 +542,7 @@ class Runs {
   // the directory of the runs: its path (selectable text), where it comes from in its tooltip, ★ lit when the setting names it
   dir() {
     const v = this.v, d = v.runsDir || '', o = v.runsDirOf, h = v.runsHost(), p = this.dirEl.querySelector('.rp'), st = this.dirEl.querySelector('.rstar');
-    const scope = o && o.scope ? ` in the ${o.scope === 'user' ? 'user' : 'workspace'}'s settings` : '';
+    const scope = o && o.scope ? ` in the ${runsScope(o.scope)}'s settings` : '';
     this.dirEl.hidden = !d; p.textContent = d;
     p.title = `the directory of the runs: ${d}\n` + (!o ? '' : o.set ?
       `from the setting wavelens.runsDir (${o.set})${scope}` :
@@ -560,7 +617,8 @@ class Runs {
       `<span class="rtags">${tags}</span>${this.deltaHtml(r, f)}` +
       (sl ? '<button type="button" data-a="sp" aria-label="its span on the waves shown" ' +
         `title="Its span on the waves shown: the window and the range on ${esc(f(r.slice.from))} … ` +
-        `${esc(f(r.slice.to))} of the dump, in A's time (s) — Slice ▸ then takes the same piece of these waves">↔</button>` : '') + (r.now ? '' :
+        `${esc(f(r.slice.to))} of the dump, in A's time (s) — Range ▸ Keep as a slice then takes the same piece of these waves">↔</button>` : '') +
+        (r.now ? '' :
         '<button type="button" data-a="ed" title="Name, tags, comment (e)">✎</button>' +
         '<button type="button" data-a="rm" title="Remove the run and its file (Delete)">✕</button>') + '</span>' +
       `<span class="r2">${comment ? `<span class="rcm">${esc(comment)}</span>` : ''}<span class="rmt">${esc(this.metaOf(r, f))}</span></span></div>`;
@@ -595,14 +653,17 @@ class Runs {
     const d = run ? 0 : this.v.runOrigin(this.v.runsA()) || 0;
     const cases = this.v.spans.filter(s => s.label && caseName(s.label)).map(s => ({ label: s.label, from: s.from + d, to: s.to + d }));
     let m;
-    try { m = run ? await h.set(run.id, body) : await h.keep(cases.length ? Object.assign({ cases }, body) : body); } catch (e) { m = { error: e.message }; }
+    try { m = run ? await h.set(run.id, Object.assign({ dir: this.v.runsDir || undefined }, body)) :
+      await h.keep(cases.length ? Object.assign({ cases }, body) : body); }
+
+    catch (e) { m = { error: e.message }; }
     if (m.error) { this.status((run ? 'not saved: ' : 'not kept: ') + m.error); return; }
     await this.load(); if (!run && m.run) { this.fi = this.rowOf(m.run.id); this.render(); }
     this.status(run ? `#${run.id} saved` : m.run ? `kept as #${m.run.id} ${m.run.name}` : 'kept');
   }
   async remove(run) {
     if (run.now) { this.status('now is the dump on the disk: not a run'); return; }
-    let m; try { m = await this.v.runsHost().rm(run.id); } catch (e) { m = { error: e.message }; }
+    let m; try { m = await this.v.runsHost().rm(run.id, this.v.runsDir || undefined); } catch (e) { m = { error: e.message }; }
     if (m.error) { this.status('not removed: ' + m.error); return; }
     if (m.cancelled) return;
     const cur = this.v.runCur === run.id, shown = this.v.runsA() === run.id; this.v.runGone(run.id);
@@ -616,7 +677,8 @@ class Runs {
     const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!cn && (v.runsL || []).some(r => (r.cases || []).some(c => c.name === cn));
     const over = byCase ? `the case ${cn}` : `${f(w.from)} … ${f(w.to)}`;
     this.status(`each run against A ${v.runName(a)} over ${over}…`);
-    let m; try { m = await v.runsHost().diff(Object.assign({ signals: v.runsSignals(), from: w.from, to: w.to, against: a }, byCase ? { case: cn } : {})); }
+    let m; try { m = await v.runsHost().diff(Object.assign({ signals: v.runsSignals(), from: w.from, to: w.to, against: a, dir: v.runsDir || undefined },
+      byCase ? { case: cn } : {})); }
     catch (e) { m = { error: e.message }; }
     if (m.error) { this.status('Δ all: ' + m.error); return; }
     let n = 0;
@@ -651,7 +713,14 @@ class Runs {
   // no B: the compare dropped, the waves only
   noB() { clearTimeout(this.settle); this.v.runsDrop(); this.v.runPickB = null; if (this.v.runCur != null) this.v.compare(null); else this.v.cmpShow();
     this.render(); this.status('no B: the waves only (]w [w walk the runs)'); }
-  // what the Open mode has not got (Δ all, ⟳, no B: the compare's)
+  // a click on a lit B: a run only picked while another is compared — the pick dropped, the compare stays (B-11); else no B
+  dropB(id) {
+    const v = this.v;
+    if (v.runPickB === id && v.runCur != null && v.runCur !== id) { v.runPickB = null; v.cmpShow(); this.render();
+      this.status(`B ${v.runName(id)} picked no more: the compare with ${v.runName(v.runCur)} stays`); return; }
+    this.noB();
+  }
+  // what the Open mode has not got (Δ all, Compare, no B: the compare's)
   onlyCompare(what) { if (this.v.runsMode !== 'open') return false; this.status(`${what} is the Compare mode's (o)`); return true; }
   events() {
     const v = this.v, el = this.el, sig = { signal: this.ac.signal };
@@ -672,7 +741,7 @@ class Runs {
         else if (a === 'ed' && run) this.openForm(run);
         else if (a === 'rm' && run) this.remove(run);
         else if (a === 'ra' && run) { this.fi = +row.dataset.i; if (v.runsMode === 'open') v.runsShow(run.id); else v.runsPickA(run.id, true); }
-        else if (a === 'rb' && run) { if (v.runsB() === run.id) this.noB(); else this.pick(+row.dataset.i); }
+        else if (a === 'rb' && run) { if (v.runsB() === run.id) this.dropB(run.id); else this.pick(+row.dataset.i); }
         return;
       }
       if (row) this.pick(+row.dataset.i);

@@ -44,7 +44,7 @@ command arrow: id? from? to? shape? head? line? color? label? delete?
 command bits: signals on?
 command bookmark: n? t? signal? text? label? color? lift? top? link? go? delete?
 command bus_list: port? kind? from? to? limit?
-command compare: result? dump? a? map? offset? off? show? mask?
+command compare: result? dump? a? map? offset? off? show? mask? from? to? go?
 command cursor: t
 command cursor2: t
 command cycles: on? clock? zero? reset?
@@ -67,10 +67,11 @@ command goto: t? sel? view? bm?
 command group: name signals? add? remove? color? rename? delete? go? move? divider?
 command hide: signals
 command highlight: add? remove? set? clear?
-command layout: scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?
+command layout: scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt? scrollbar?
 command marker: id? t? label? color? signal? lift? hidden? dmin? dmax? delete?
 command measures: 
 command only: modules? on? clear? open? groups?
+command order: signal? move? module? clear?
 command paint: signals? color? clear?
 command picture: format? from? to? rows?
 command radix: signals radix
@@ -84,6 +85,7 @@ command sort: dir ignore?
 command span: id? from? to? label? color? signals? delete?
 command state: 
 command style: name
+command sva: filter? mask?
 command types: signals?
 command unfold: groups? all?
 command view: from? to? at? span?

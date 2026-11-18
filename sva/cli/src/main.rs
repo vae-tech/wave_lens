@@ -28,7 +28,7 @@ mod vcd;
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
-use sva_core::{check_report_input, describe, diagnostic, evaluate, report_html, report_junit, report_markdown, summarize, time_text, Assertion, Column, Kind, Listed, Options, Outcome, Results, Status, Trace, Unit, XMode, V};
+use sva_core::{check_report_input, describe, diagnostic, evaluate, report_html, report_junit, report_markdown, summarize, time_text, Assertion, Column, Kind, Options, Outcome, Results, Trace, Unit, XMode, V};
 use wellen::{simple, Hierarchy, SignalRef, TimeTableIdx, VarRef, VarType};
 
 /// Set when stdout is closed (`sva eval … | head -1`): the rest of the output is dropped, the exit status stays the
@@ -129,6 +129,7 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
        sva --waves DUMP --info
        sva vcd DUMP [--out FILE.vcd]          (an FST as VCD text, enum tables included, as fst2vcd -e writes it)
        sva fst DUMP.vcd [--out FILE.fst]      (a VCD as an FST, by default DUMP.fst; enum tables and tb.types.json's FSM states kept)
+       sva fst DUMP --from T --to T [--zero] [--signals PAT,...] [--signals-from FILE] --out PIECE.fst   (a cut, as an FST)
        sva vcd DUMP --from T --to T [--signals PAT,...] [--signals-from FILE] [--out cut.vcd]   (a cut of a dump: a window, some signals)
        sva vcd DUMP.fst --header | --codes FILE    (the declarations alone; the changes of those id codes)
        sva diff A B [--signals PAT,...] [--signals-from FILE] [--scope S] [--from T --to T] [--offset T] [--map A=B ...]
@@ -136,7 +137,8 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
                 (two dumps compared change by change: sva diff --help)
        sva diff --results A.json B.json [--map A=B ...] [--json [FILE.json|-]] [--junit FILE] [--limit N]
                 (two runs' assertion results: new, gone, moved failures, covers lost)
-       sva runs keep DUMP [--name N] [--tags T,...] [--comment C] | list | set RUN ... | rm RUN... | path RUN
+       sva runs keep DUMP [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--from T --to T] [--dir D]
+                | list | set RUN ... | rm RUN... | path RUN
        sva runs diff DUMP [--against RUN] [--run RUN ...] [--from T --to T] [--signals PAT,...] [--signals-from FILE] [--json]
                 [--page]
                 (the runs kept of a dump in .wavelens-runs beside it, the dump or a run compared with them: sva runs --help)
@@ -145,7 +147,9 @@ TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown na
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;
 sva report --json writes the summary). --max-failures: failures listed per assertion in the texts (default 20, 0 all).
 A large dump (the page reads it so): --no-pass lists the failures and the attempts without verdict, the passes only
-counted; --max-attempts N lists the first N attempts of each assertion (a note says how many there were); --cycle-runs
+counted; --max-attempts N lists N attempts of each assertion, the failures first (the first by start), then the others
+by start, the rest counted only, never held (a note and \"listed\" say how many there were and the failures found first
+and last: the report and sva diff --results read it); --cycle-runs
 writes the cycles' times in the JSON as runs, \"cycle_runs\": [[first, step, count], ...], not one number per cycle.
 Exit status: 0 everything evaluated passed; 1 a failure or an attempt without verdict (capped, the thread limit:
 --max-threads, default 256); 2 nothing checked as asked (usage, syntax error, a signal not in the dump, no assertion,
@@ -174,8 +178,6 @@ struct Args {
     /// --alias NAME=PATH: the shown name of the variable at PATH (a config's "alias", as the page has it)
     aliases: BTreeMap<String, String>,
     max_failures: Option<u64>,
-    /// --max-attempts: the first N attempts of each assertion listed (the rest counted)
-    max_attempts: Option<usize>,
     /// --cycle-runs: the cycles' times in the JSON as runs [first, step, count]
     cycle_runs: bool,
 }
@@ -240,7 +242,7 @@ fn args(argv: &[String]) -> Result<Args, String> {
             }
             "--max-threads" => a.opt.max_threads = count(&next(&mut it, "--max-threads")?, "--max-threads")?.max(1) as usize,
             "--max-failures" => a.max_failures = Some(count(&next(&mut it, "--max-failures")?, "--max-failures")?),
-            "--max-attempts" => a.max_attempts = Some(count(&next(&mut it, "--max-attempts")?, "--max-attempts")? as usize),
+            "--max-attempts" => a.opt.max_listed = Some(count(&next(&mut it, "--max-attempts")?, "--max-attempts")? as usize),
             "--cycle-runs" => a.cycle_runs = true,
             "--no-pass" => a.opt.passes = false,
             "--x" => {
@@ -516,38 +518,6 @@ fn summary(o: &Outcome, times: &[u64], width: usize) -> String {
     format!("{head} {} attempts: {} pass, {} fail, {} vacuous, {} active, {} disabled{capped}{fail}", s.attempts, s.pass, s.fail, s.vacuous, s.active, s.disabled)
 }
 
-/// --max-attempts: the first n attempts of `o` listed, the failures first (a list of disabled or capped attempts does not hide
-/// them), then the others, by start; what the cut list cannot say (how many there were, the failure found last, the longest)
-/// in `o.listed`.
-fn cut_attempts(o: &mut Outcome, n: usize) {
-    if o.attempts.len() <= n {
-        return;
-    }
-    let total = o.attempts.len();
-    let last = o.attempts.iter().filter(|x| x.result == Status::Fail).max_by_key(|x| (x.failed_at.unwrap_or(x.end), x.start)).cloned();
-    let longest = (o.kind != Kind::Cover).then(|| {
-        o.attempts.iter().filter(|x| !matches!(x.result, Status::Active | Status::Capped)).map(|x| (x.end.max(x.start) - x.start, x.start))
-            .max_by_key(|&(l, s)| (l, std::cmp::Reverse(s)))
-    }).flatten();
-    let l = o.listed.get_or_insert(Listed { passes: true, of: None, longest: None, last_fail: None });
-    l.of = Some(total);
-    l.last_fail = last;
-    if l.longest.is_none() {
-        l.longest = longest.map(|(len, s)| [len, s]);
-    }
-    let fails = o.attempts.iter().filter(|x| x.result == Status::Fail).count().min(n);
-    let mut left = (fails, n - fails);
-    o.attempts.retain(|x| {
-        let k = if x.result == Status::Fail { &mut left.0 } else { &mut left.1 };
-        if *k == 0 {
-            return false;
-        }
-        *k -= 1;
-        true
-    });
-    o.notes.push(format!("the first {n} of {total} attempts listed, the failures first (--max-attempts)"));
-}
-
 /// Times as runs `[first, step, count]` (a clock's edges: one run while its period holds).
 fn runs(t: &[u64]) -> Vec<[u64; 3]> {
     let mut out: Vec<[u64; 3]> = Vec::new();
@@ -764,10 +734,6 @@ fn eval_cmd(a: Args) -> ExitCode {
                     if gi > 0 {
                         o.clock = Some(clk_name.clone());
                         o.cycles = Some(shown.clone());
-                    }
-                    // cut now, not once every assertion is held whole (review 2026-11-13 B-16)
-                    if let Some(n) = a.max_attempts {
-                        cut_attempts(&mut o, n);
                     }
                     outs.push((k, o, gi));
                 }

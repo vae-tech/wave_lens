@@ -32,7 +32,8 @@ window of sva diff / sva vcd --from reads only the blocks from there). The last 
 A window (--from/--to, TIME 100ns, 2.5us; ps without one): the cut sva vcd --from --to writes (every signal's value at
 --from, its changes to --to) as an FST to --out; --zero: its times from 0 (--from is 0: pieces of one or several dumps
 compared with each other from their first sample, sva diff A.fst B.fst); --signals / --signals-from: only those, as
-sva vcd takes them (a dump, VCD or FST, cut to some signals only is a cut too).";
+sva vcd takes them (a dump, VCD or FST, cut to some signals only is a cut too). --large-bytes N (for the tests): a
+dump this large says how far it is (default 64 MiB).";
 
 /// Bytes of value changes held before a block is written (`--block-bytes`; `sva runs keep` writes 1 MiB).
 const BLOCK: usize = 64 << 20;

@@ -23,8 +23,9 @@ const barKeep = (v, part) => {
 };
 G.addEventListener('storage', e => { if (e.key === BARKEY || e.key === null) for (const w of VIEWS) if (w.root.isConnected) w.barReload(); });
 // the horizontal scroll bar at the foot of the waves in sight (the setting scrollbar): its track all of the waves (the gaps on
-// the waves: the cut-out axis, as the window shows it), its thumb the window. A drag moves the window, a click on the track
-// brings the window's middle there; while it is held, the window's ends, rounded to its scale, over the thumb
+// the waves: the cut-out axis, as the window shows it), its thumb the window. A drag moves the window, a click on the track (its
+// lowest 4 px: the rest of the strip lets the clicks through to the last row, B-20) brings the window's middle there; while it is
+// held, the window's ends, rounded to its scale, over the thumb
 const HSB_H = 10;
 Object.assign(WaveView.prototype, {
   hsbGeom() {
@@ -33,6 +34,12 @@ Object.assign(WaveView.prototype, {
     return { T: M.t1 - M.t0, a: this.t0 - M.t0, b: this.t0 - M.t0 + this.span, F: null };
   },
   hsbTo(a) { const g = this.hsbGeom(); if (g.F) this.warpPlace(g.F, a); else this.t0 = this.clamp(this.M.t0 + a); this.draw(); },
+  // the thumb on a track W px wide: w its width (at least 18 px), x its left; the window's start 0 … T − (b − a) on 0 … W − w (B-19:
+  // flush right only with the window at the end), k the time of a pixel of the thumb's way
+  hsbThumb(g, W) {
+    const span = g.b - g.a, w = Math.min(W, Math.max(span / g.T * W, 18)), room = Math.max(g.T - span, 0), way = W - w;
+    return { w, x: way > 0 && room > 0 ? Math.max(0, Math.min(g.a / room, 1)) * way : 0, k: way > 0 ? room / way : 0 };
+  },
   // after a frame (draw): the bar on the last line of the canvas in sight, its thumb where the window is; none when all is in it
   hsbPlace(f) {
     const el = this.hsbEl; if (!el) return;
@@ -40,12 +47,19 @@ Object.assign(WaveView.prototype, {
     if (el.hidden === on) el.hidden = !on;
     if (!on) return;
     this.hsbF = f;
-    const W = f.W, w = Math.min(W, Math.max((g.b - g.a) / g.T * W, 18)), x = Math.max(0, Math.min(g.a / g.T * W, W - w)), t = el.firstChild;
-    // on the canvas's last line, or the screen's (the box's) when the canvas goes on under it: in sight
+    const { w, x } = this.hsbThumb(g, f.W), t = el.firstChild;
+    // on the canvas's last line, or the screen's (the box's, the screen's when the box goes on under it: B-18) when the canvas
+    // goes on under it: in sight
     const own = this.root.classList.contains('wv-scroll'), top = this.wcol.getBoundingClientRect().top;
-    const low = (own ? this.bodyEl.getBoundingClientRect().bottom : window.innerHeight) - top;
+    const low = Math.min(own ? this.bodyEl.getBoundingClientRect().bottom : Infinity, window.innerHeight) - top;
     el.style.top = Math.max(f.oy, Math.min(f.oy + f.Hc, low) - HSB_H) + 'px'; t.style.left = x + 'px'; t.style.width = w + 'px';
     if (this.hsbHeld) this.hsbTip();
+  },
+  // the setting scrollbar of this viewer (the command layout scrollbar, a state's config; M-07): null, the settings' own
+  setScrollbar(on, o = {}) {
+    const base = settings(GLOBAL, this.M.cfg, this.opts).scrollbar !== false, want = on == null ? base : !!on;
+    if (want === base) delete this.local.scrollbar; else this.local.scrollbar = want;
+    this.S.scrollbar = want; if (!o.quiet) this.draw(); return this;
   },
   hsbTip() {
     const tip = this.hsbEl.querySelector('.hsbtip'), t = this.hsbEl.firstChild, f = x => this.fmt(x, this.span / 100, this.span);
@@ -57,9 +71,9 @@ Object.assign(WaveView.prototype, {
     const el = this.hsbEl; if (!el) return; let d = null;
     el.addEventListener('pointerdown', e => {
       if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
-      const r = el.getBoundingClientRect(), g = this.hsbGeom(), k = g.T / Math.max(r.width, 1);
+      const r = el.getBoundingClientRect(), g = this.hsbGeom(), { w, k } = this.hsbThumb(g, r.width);
       this.markView();   // l: the window before
-      if (e.target !== el.firstChild) this.hsbTo((e.clientX - r.left) * k - (g.b - g.a) / 2);   // the track: the window's middle there
+      if (e.target !== el.firstChild) this.hsbTo((e.clientX - r.left - w / 2) * k);   // the track: the thumb's (the window's) middle there
       d = { x: e.clientX, a: this.hsbGeom().a, k, id: e.pointerId };
       try { el.setPointerCapture(e.pointerId); } catch (x) { /* gone */ }
       el.classList.add('on'); this.hsbHeld = true; this.hsbTip();
@@ -171,13 +185,14 @@ Object.assign(WaveView.prototype, {
   },
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || Object.keys(this.order).length || this.analogs.size ||
+      const order = Object.keys(this.order).length ? this.order : (this.orderWas && this.orderWas.order) || {};   // a sort's drop: kept aside (B-21)
+      if (this.radixes.size || this.hiddenRows.size || Object.keys(order).length || this.analogs.size ||
         this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas ||
         (this.M.measures || []).length) {   // (the Δ off on a page with measurements: kept off)
         localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
           groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas,
-          ...(Object.keys(this.order).length ? { order: ownOrder(this.order) } : {}) }));
+          ...(Object.keys(order).length ? { order: ownOrder(order) } : {}) }));
       } else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   },

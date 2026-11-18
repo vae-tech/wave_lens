@@ -22,14 +22,16 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html" aria-current="page">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html">Keys</a>
   <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
 <header class="hero"><div class="kicker">Guide</div><h1>VS Code</h1>
-<p class="lead">The dumps are on a Linux machine — a build server over Remote-SSH, or WSL on your laptop — and VS Code is on yours.
-  The WaveLens extension opens a <code>.vcd</code> or <code>.fst</code> of that machine in a tab with the viewer: right click,
-  <span class="ui">Open in WaveLens</span>. Nothing else to install on the host, no port to forward.</p></header>
+<p class="lead">The dumps are on a Linux machine — a build server over Remote-SSH, or WSL on your laptop — and VS Code is on yours
+  (or on that machine; a Windows machine's own dumps work the same way). The WaveLens extension opens a <code>.vcd</code> or
+  <code>.fst</code> of the machine with the dumps in a tab with the viewer: right click, <span class="ui">Open in WaveLens</span>.
+  Nothing else to install there, no port to forward.</p></header>
 
 <h2 id="how">Where what runs</h2>
 <div class="split" role="figure" aria-label="The extension on the Linux host, the tab on your machine">
@@ -38,7 +40,7 @@
     <li>the <b>tab</b>: the viewer draws the waves here</li>
     <li>your clipboard, VS Code's theme and keys</li></ul></div>
   <div class="link">VS Code's own<br>remote channel<br>⇄</div>
-  <div class="box"><h4>The Linux host (Remote-SSH / WSL)</h4><ul>
+  <div class="box"><h4>The host with the dumps (Linux over Remote-SSH / WSL; or this Windows machine)</h4><ul>
     <li>the <b>extension</b> (a <i>workspace</i> extension) and the static <code>sva</code> it carries</li>
     <li>the dumps, the simulator, your files</li>
     <li>an agent's <code>tools/wavemcp.py</code>, if you use one</li></ul></div>
@@ -50,8 +52,9 @@
 <h2 id="install">Installing</h2>
 <ol class="steps">
   <li>The package comes with a clone: <code>bin/wavelens.vsix</code>, the build of the version. To pack the tree as it is now (no node, no npm):
-    <code>make vsix</code> → <code>out/wavelens.vsix</code> (the last build) and its copy <code>out/wavelens-&lt;version&gt;.vsix</code> (the versions kept side by side: install another one to compare). It is
-    for a Linux x86-64 host; VS Code 1.80 or newer.</li>
+    <code>make vsix</code> → <code>out/wavelens.vsix</code> (the last build) and its copy <code>out/wavelens-&lt;version&gt;.vsix</code> (the versions kept side by side: install another one to compare). It
+    carries the <code>sva</code> program for a Linux x86-64 and a Windows x86-64 host (another host, macOS or arm64:
+    <code>wavelens.sva</code>, <a href="#settings">below</a>); VS Code 1.80 or newer.</li>
   <li>Connect VS Code to the host (<i>Remote-SSH: Connect to Host…</i>, or <i>WSL: Connect to WSL</i>) and open the folder of your
     dumps.</li>
   <li>In a terminal of that <b>remote</b> window: <code>code --install-extension bin/wavelens.vsix --force</code>
@@ -61,8 +64,9 @@
 </ol>
 <p>Without <code>make</code>: <code>python3 -I tools/mkvsix.py</code> writes the same package. The extension of before the rename
   to WaveLens goes with <code>code --uninstall-extension wavefw.wavefw</code>.</p>
-<div class="note"><p>Installed in a local window instead, the extension cannot see the host's files. If the right click on a
-  <code>.vcd</code> has no <span class="ui">Open in WaveLens</span>, check that it is installed on the host.</p></div>
+<div class="note"><p>Installed in a local window instead, the extension cannot see the host's files (it opens the local
+  machine's own dumps: on Windows, install it there the same way). If the right click on a <code>.vcd</code> has no
+  <span class="ui">Open in WaveLens</span>, check that it is installed on the host.</p></div>
 
 <h2 id="open">Opening a dump</h2>
 <p>In the Explorer, right click a <code>.vcd</code> or <code>.fst</code> → <span class="ui">Open in WaveLens</span>, or
@@ -76,26 +80,19 @@
 <h2 id="differs">What the tab does differently</h2>
 <table>
   <tr><th></th><th>In a VS Code tab</th></tr>
-  <tr><td>a large dump</td><td>an FST of 4 MB or a VCD of 64 MB and more (<code>wavelens.lazy</code>) opens with every module
-    and signal at once, the top level open and its modules folded, no value read yet; open a module and the signals on the screen
-    are read from the dump's FST (<code>sva vcd --codes</code>; a VCD is made an FST once) over the whole dump as a summary: a busy
-    signal (a clock) as a bar where it changes more often than the screen shows, its value there <code>…</code>. Assertions, the
-    FSM panel and pictures read what they need first. With no <code>sva</code> CLI on the host (Windows without <code>wavelens.sva</code>) a VCD is
-    read whole instead, the tab says why; an FST needs the CLI. <i>WaveLens: Set the sva program…</i> (offered then, also in the
-    tab's ⋯ menu) lists the <code>sva</code> programs found on the machine, each tried, or a file you pick, and sets
-    <code>wavelens.sva</code>.</td></tr>
+  <tr><td>a large dump</td><td>read as it is needed, not whole (<a href="#large">below</a>)</td></tr>
   <tr><td>a new simulation</td><td>the tab sees the dump change on the disk (polled: an NFS home works too) and offers
     <span class="ui">⟳</span> in the bar, or <i>WaveLens: Read the dump again</i> in the editor's title; the view is kept.
     <code>wavelens.autoReload: true</code> reads it at once.</td></tr>
   <tr><td>files</td><td><span class="ui">Save</span>, PNG / SVG / WaveDrom and the assertions' report ask where to save <b>on the
-    host</b>; <span class="ui">Load…</span>, the <code>.sv</code> files and <span class="ui">Compare…</span> pick there (an FST to
-    compare is converted too); <span class="ui">Open…</span> a dump opens a tab of its own.</td></tr>
-  <tr><td>the runs kept</td><td><span class="ui">Runs…</span> (<kbd>g</kbd> <kbd>u</kbd>, <i>WaveLens: The runs kept of this dump</i>):
-    keep the dump of now with a name, tags and a comment (an FST in <code>.wavelens-runs</code> beside it), pick a run as B (and one
-    as A), then <span class="ui">Compare</span> compares them, or Δ all every run, over the waves in sight or a span of yours (a test case: the run's case of that name, wherever it is) —
-    only that window of a run is read, on the host; or, with the panel's switch on <span class="ui">Open</span>, open the runs one
-    after another, nothing compared
-    (<a href="compare.html#runs">Compare two runs</a>).</td></tr>
+    host</b>; <span class="ui">Load…</span>, the <code>.sv</code> files and <span class="ui">Compare with…</span> pick there (Compare
+    then runs <code>sva diff</code> on the host over the window in sight, a VCD or an FST); <span class="ui">Open dump…</span> opens a tab
+    of its own.</td></tr>
+  <tr><td>the runs kept</td><td><span class="ui">File ▾ → Runs…</span> (<kbd>g</kbd> <kbd>u</kbd>,
+    <i>WaveLens: The runs kept of this dump</i>): keep the dump of now with a name, tags and a comment (an FST in <code>.wavelens-runs</code> beside it), pick a run as B
+    (and one as A), then <span class="ui">Compare</span> compares them, or Δ all every run, over the waves in sight or a span of
+    yours — only that window of a run is read, on the host; or, with the panel's switch on <span class="ui">Open</span>, open the runs
+    one after another, nothing compared (<a href="runs.html">Runs: keep, browse, compare, slice</a>).</td></tr>
   <tr><td>the last state</td><td>the state loaded last is the workspace's, whichever dump it was: <span class="ui">Load…</span> opens on that file,
     <span class="ui">Reload</span> (<kbd>r</kbd>) reads it in every tab, and a dump seen for the first time takes it at once (ctrl+Z undoes it);
     a dump with a view of its own keeps it.</td></tr>
@@ -133,6 +130,25 @@
   <tr><td>a big dump</td><td>read whole (<code>wavelens.lazy</code> never, or under its sizes), the cut of <code>dumpBudget</code> applies; the whole VCD text crosses to your machine once per
     read.</td></tr>
 </table>
+
+<h2 id="large">A large dump</h2>
+<p>An FST of 4 MB or a VCD of 64 MB and more (<code>wavelens.lazy</code>: auto) is not sent to the tab whole. It opens with every module
+  and signal at once, the top level open and its modules folded, no value read yet; the signals you open are read from the dump's FST
+  on the host (a VCD is made an FST once, by the bundled <code>sva</code>):</p>
+<ul>
+  <li>over the whole dump as a <b>summary</b>: a busy signal (a clock) is a bar where it changes more often than the screen shows,
+    its value there <code>…</code>;</li>
+  <li><b>zoomed in</b>, the signals in sight are read again for that window: exact as soon as a signal changes at most
+    <code>lazyKeep</code> times there;</li>
+  <li><b>assertions</b> over a signal too busy to read whole are evaluated by <code>sva eval</code> over the whole dump on the host: the
+    counts and failures of all of it, the passes of the window in sight once it is narrow enough (<a href="sva.html#large">A large dump</a>
+    in the Assertions guide); the FSM panel, the gaps, the cycles and pictures read what they need first.</li>
+</ul>
+<p>The package's <code>sva</code> serves Linux x86-64 and Windows x86-64. With no <code>sva</code> program that works on the host (another
+  host without <code>wavelens.sva</code>, or one that fails on the dump) a VCD up to 256 MB is read whole, the tab says why, and a larger
+  one is refused with a message naming <i>WaveLens: Set the sva program…</i> (also in the tab's ⋯ menu: the <code>sva</code> programs
+  found on the machine, each tried, or a file you pick; it sets <code>wavelens.sva</code>). An FST always needs the program.
+  Everything about large dumps — what is read when, the limits, converting once: <a href="large.html#top">Large dumps in VS Code</a>.</p>
 
 <h2 id="log-links">Links from a log</h2>
 <p>A time in the terminal, a <code>.log</code> / <code>.txt</code> / <code>.out</code> file or a task's output is a link (ctrl+click): <code>@ 1234 ns</code>,
@@ -202,7 +218,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.62 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

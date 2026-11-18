@@ -14,6 +14,7 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html">Keys</a>
   <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html" aria-current="page">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
@@ -94,7 +95,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     (its number or name) is A instead of the dump, the others compared with it (<code>run: "now"</code> adds the dump) — "which
     runs differ from the golden one"; the answer's <code>against</code> names it</td></tr>
   <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small dump at <code>out</code>, a VCD or an FST as its name says
-    (<code>x.vcd</code>, <code>x.fst</code>; another name is refused), <code>zero</code>: its times from 0: for <span class="ui">Compare…</span> on a page,
+    (<code>x.vcd</code>, <code>x.fst</code>; another name is refused), <code>zero</code>: its times from 0: for <span class="ui">Compare with…</span> on a page,
     a fixture, a report, one test case to send</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, expressions, a group
     of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
@@ -229,6 +230,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <code>{"op": "expr_go", "id": 1, "n": 2}</code> puts their cursor on a match; <code>{"op": "expr_matches", "id": 1, "limit": 50}</code> lists the stretches (<code>next_offset</code>
   goes on). <code>expr_go</code> and <code>expr_matches</code> need a live page; into a file <code>expr</code> writes the list, valued when the page opens. <code>view_get</code>
   lists them under <code>exprs</code>, the person's own too. To search a dump without a page: <code>wave_find</code>.</p>
+<p id="svafind">The page's assertions, found: <code>{"op": "sva", "filter": "@PREADY is:fail", "mask": true}</code> narrows the person's
+  <a href="sva.html#find">Assertions panel</a> to the ones that read <code>PREADY</code> and failed, the waves to their groups, and answers
+  them live (<code>matches</code>: <code>assert</code>, <code>scope</code>, <code>signals</code>, <code>state</code>, <code>counts</code>);
+  into a file it writes the search, the page opens with it. Without a page, over a dump: <code>sva_check</code>.</p>
 <p>To show only what an expression found, <code>{"op": "expr", "id": 1, "gap": true}</code> cuts the waves to its matches, those of every expression with <code>gap</code>
   together, a gap between (<a href="sva.html#expr-gap">Expressions</a>): tune with <code>{"op": "gaps", "idle": 2, "keep": 0}</code>. Live the answer has <code>cut</code> in ns, as
   below, and <code>view_get</code> names them, <code>gaps.by: [1]</code>; <code>{"op": "expr", "id": 1, "gap": false}</code> or <code>{"op": "gaps", "view": false}</code> ends it.</p>
@@ -342,7 +347,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.62 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

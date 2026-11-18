@@ -56,6 +56,8 @@ help:
 	@echo 'make shots-check  both made again into $$(BUILD), compared pixel by pixel with the committed ones (tests/pngdiff.py): a change fails'
 	@echo 'make pageshot   HTML=page.html [VIEW=key THEME=dark|light|both OUT=dir]: PNGs of a page'"'"'s views in a headless Chromium (tools/pageshot.py, playwright)'
 	@echo 'make guide-shots  the pictures of the guides in docs/guides/img (after make examples; ONLY=gaps,sva: those guides)'
+	@echo 'make guide-shots-check  the same made again into $$(BUILD)/guide-img, compared pixel by pixel with docs/guides/img (tests/pngdiff.py):'
+	@echo '                a change fails; not in make check: run it after a change of the look (ONLY=…: the pictures of those guides)'
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
@@ -217,6 +219,14 @@ pageshot:
 # the pictures of the guides (docs/guides/*.html): docs/guides/img/*.png; the gaps guide's dump is made in BUILD/guides
 guide-shots:
 	$(PW) tests/guide_shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
+
+# the guides' pictures made again into BUILD/guide-img and compared with docs/guides/img (review 2026-11-18 G-03): a picture
+# that changed, one no longer made or a new one not committed fails (vscode-fsm.png is made by hand: make vscode-e2e);
+# ONLY=: those guides' pictures. Not in make check (a minute; the guides are remade with a change of the look)
+guide-shots-check:
+	@rm -rf $(B)/guide-img   # every picture made by this run: none left from an earlier one
+	$(PW) tests/guide_shots.py --build $(B) --out $(B)/guide-img $(if $(ONLY),--only $(ONLY)) > /dev/null
+	$(PY) tests/pngdiff.py docs/guides/img $(B)/guide-img --skip vscode-fsm.png --how 'make guide-shots' $(if $(ONLY),--made)
 
 # every shot made again: a shot that no longer builds fails, and so does a picture that changed (the look changed: make
 # shots and commit the PNGs with the change); the pictures made again and compared with the committed ones, docs/img and the visual regression's tests/visual
@@ -465,4 +475,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: fsm-stats diff-results cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-sva-linux dist-windows mingw-local sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: fsm-stats diff-results cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-sva-linux dist-windows mingw-local sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check guide-shots-check unit check fmt lint clean clean-all

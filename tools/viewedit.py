@@ -67,12 +67,12 @@ COMMANDS = {
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
     'duplicate': 'signals bits? radix? rows? delete?',
-    'sort': 'dir ignore?', 'style': 'name',
-    'layout': 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
+    'sort': 'dir ignore?', 'order': 'signal? move? module? clear?', 'style': 'name',
+    'layout': 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt? scrollbar?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open? groups?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_panel': 'signal? tab? off?', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
-    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show? mask?',
+    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show? mask? from? to? go?', 'sva': 'filter? mask?',
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
@@ -82,10 +82,39 @@ LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals'
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'goto': ('t',), 'bus_list': ('from', 'to'), 'marker': ('t', 'dmin', 'dmax'), 'deltas': ('dmin', 'dmax'),
              'span': ('from', 'to'),
-             'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',), 'expr_matches': ('from', 'to')}
+             'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset', 'from', 'to'), 'expr_matches': ('from', 'to')}
 # what a saved state has (view.js state(), the plugins' addState): set_state takes these, nothing else
 STATE_KEYS = {'from', 'to', 'cursor', 'cursor2', 'range', 'edge', 'paint', 'radix', 'analog', 'hidden', 'order', 'dups', 'deltas', 'bits', 'select', 'find',
-              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'runsOver', 'runsMode', 'folds', 'exprs', 'sva', 'bus'}
+              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'runsOver', 'runsMode', 'folds', 'exprs', 'sva', 'bus', 'svaFilter'}
+# the Assertions panel's search (sva.js svaQuery): its states, and what a term without its word lacks
+SVA_IS = ('fail', 'pass', 'vacuous', 'cover', 'assert', 'assume', 'unbound', 'error', 'capped', 'running')
+SVA_WHAT = {'name': 'a name after !', 'sig': 'a signal after @', 'in': 'an instance after in:', 'is': f'one of {" ".join(SVA_IS)} after is:'}
+
+
+def sva_query_errors(q):
+    """sva.js svaQuery: the terms of a search of the assertions it does not understand (said; nothing is filtered by them)."""
+    out = []
+    for raw in str(q or '').split():
+        m = re.match(r'(@|in:|is:)?(.*)$', raw[1:] if raw.startswith('!') else raw, re.I | re.S)
+        kind = {'@': 'sig', 'in:': 'in', 'is:': 'is'}.get((m.group(1) or '').lower(), 'name')
+        alts = [x for x in m.group(2).split(',') if x]
+        bad = [x.lower() for x in alts if x.lower() not in SVA_IS] if kind == 'is' else []
+        if not alts:
+            out.append(f'"{raw}": {SVA_WHAT[kind]}')
+        elif bad:
+            out.append(f'"{raw}": {", ".join(bad)} is no state ({" ".join(SVA_IS)})')
+    return out
+
+
+def sva_filter(x):
+    """sva.js filterOf: the search's {query, mask} of a setting or a state (a text alone is a query), else None."""
+    if isinstance(x, str):
+        return {'query': x.strip(), 'mask': False}
+    if isinstance(x, dict):
+        return {'query': str('' if x.get('query') is None else x['query']).strip(), 'mask': bool(x.get('mask'))}
+    return None
+
+
 COLOR_FN = re.compile(r'(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^;{}()]*\)|var\(\s*--[\w-]+\s*\)', re.I)
 # the painters' colour names (model.js TOK, and the tokens bus.js and sva.js register): a word the page draws as a colour
 TOKENS = {'fg', 'muted', 'line', 'panel', 'panel2', 'acc', 'one', 'bus', 'x', 'xsoft', 'z', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'band',
@@ -125,6 +154,15 @@ def gap_len_ok(v, zero):
     else:
         n = parse_t(v)
     return finite(n) and (n >= 0 if zero else n > 0)
+
+
+def cmd_str(x, what):
+    """edit.js cmdStr: a text of a command (a label, a bookmark's text) as String() of it, not an object (M-08); null: none."""
+    if x is None:
+        return ''
+    if isinstance(x, dict):
+        fail(f'{what}: a text, not {json.dumps(x)}')
+    return js_str(x)
 
 
 def js_str(x):
@@ -977,9 +1015,9 @@ class Editor:
         if 'signal' in a:
             b['signal'] = sig
         if 'text' in a:
-            b['text'] = '' if a['text'] is None else js_str(a['text'])
+            b['text'] = cmd_str(a['text'], 'text')
         if 'label' in a:
-            b['label'] = '' if a['label'] is None else js_str(a['label'])
+            b['label'] = cmd_str(a['label'], 'label')
         if 'color' in a:
             b['color'] = color_ok(a['color'])
         if 'lift' in a:
@@ -1069,7 +1107,7 @@ class Editor:
         if 'color' in a:
             x['color'] = color_ok(a['color'])
         if 'label' in a:
-            x['label'] = '' if a['label'] is None else js_str(a['label'])
+            x['label'] = cmd_str(a['label'], 'label')
         self.put_marks(None, ars)
         return {'id': i + 1}
 
@@ -1104,7 +1142,7 @@ class Editor:
         if t is not None:
             m['t'] = t
         if 'label' in a:
-            m['label'] = '' if a['label'] is None else js_str(a['label'])
+            m['label'] = cmd_str(a['label'], 'label')
         if 'color' in a:
             m['color'] = color_ok(a['color'])
         if 'signal' in a:
@@ -1224,7 +1262,7 @@ class Editor:
         if s['from'] > s['to']:
             s['from'], s['to'] = s['to'], s['from']
         if 'label' in a:
-            s['label'] = '' if a['label'] is None else js_str(a['label'])
+            s['label'] = cmd_str(a['label'], 'label')
         if 'color' in a:
             s['color'] = color_ok(a['color'])
         if a.get('signals') is not None:
@@ -1248,6 +1286,10 @@ class Editor:
         new = fulls(a['signals']) if a.get('signals') is not None else None
         add = fulls(a['add']) if a.get('add') is not None else []
         rm = fulls(a['remove']) if a.get('remove') is not None else []
+        if a.get('rename') is not None and not isinstance(a['rename'], str):
+            fail('rename: a name (a text)')
+        if a.get('rename') is not None and not g:
+            fail(f'no group "{name}" to rename')
         to = str(a['rename']).strip() if a.get('rename') is not None else None
         if to == '' or (to and to != name and any(x['name'] == to for x in gs)):
             fail(f'rename: a group "{to}" is there' if to else 'rename: a name')
@@ -1706,16 +1748,141 @@ class Editor:
         self.st['bits'] = b
         return {'signals': len(rows)}
 
+    def order_basis(self):
+        """view.js orderBasis: the sort your order is of (the sort, its prefixes, groupOrder)."""
+        ign = sorted(prefixes(self.opt('sortIgnore')), key=lambda s: -len(s))
+        return (self.opt('sort', 'none'), tuple(ign), self.m.cfg.get('groupOrder', 'file'))
+
+    def order_check(self, was):
+        """view.js orderCheck: another sort than the one your order is of drops it -> the modules dropped."""
+        n = len(own_order(self.st.get('order')))
+        if n and self.order_basis() != was:
+            self.st['order'] = {}
+            return n
+        return 0
+
     def c_sort(self, a):
         if a.get('dir') not in SORTS:
             fail(f'dir: one of {" ".join(SORTS)}')
-        c = self.config()
-        if a['dir'] != self.opt('sort', 'none') and own_order(self.st.get('order')):
-            self.st['order'] = {}   # (view.js setSort: another order of the names drops yours)
+        c, was = self.config(), self.order_basis()
         c['sort'] = a['dir']
         if a.get('ignore') is not None:
             c['sortIgnore'] = sorted(prefixes(a['ignore']), key=lambda s: -len(s))
-        return {'sort': c['sort'], 'ignore': c.get('sortIgnore')}
+        n = self.order_check(was)   # (view.js setSort: another order of the names drops yours, said)
+        ign = sorted(prefixes(self.opt('sortIgnore')), key=lambda s: -len(s))   # (edit.js: the viewer's, the setting's when none given)
+        return {'sort': c['sort'], 'ignore': ign, **({'orderDropped': n} if n else {})}
+
+    def own_pick(self, spec):
+        """edit.js ownPick: the row of the dump the command order names; two rows of one path told apart as your order does
+        ("top.sub#2" the second)."""
+        at = lambda full, n: ([r for r in self.m.rows if r['type'] != 'space' and r.get('full') == full][n - 1:n] or [None])[0]
+        try:
+            hit = self.m.pick(self.st, spec, groups=True)
+        except WaveError:
+            mt = re.fullmatch(r'(.*)#(\d+)', spec)
+            r = mt and at(mt[1], int(mt[2]))
+            if r:
+                return r
+            raise
+        fulls = list(dict.fromkeys(r['full'] for r in hit))
+        if len(fulls) != 1:
+            fail(f'one signal or module, not {len(fulls)} ({", ".join(fulls[:4])})')
+        same = [r for r in self.m.rows if r['type'] != 'space' and r.get('full') == fulls[0]]
+        if len(same) > 1:
+            kinds = ', '.join('a module' if r['type'] == 'group' else 'a signal' for r in same)
+            fail(f'two rows "{fulls[0]}" ({kinds}): the second is "{fulls[0]}#2"')
+        return hit[0]
+
+    def own_row(self, r):
+        """edit.js ownRow: a signal or a module of the dump (not your group's, a copy, a bit)."""
+        return r['type'] in ('sig', 'group') and not r.get('user') and not r.get('ug') and not r.get('dup') and any(x is r for x in self.m.rows)
+
+    def own_place(self, r, own):
+        """edit.js ownPlace: the row's siblings in display order, its run between spacers, the rows shown."""
+        sort, ign = self.opt('sort', 'none'), sorted(prefixes(self.opt('sortIgnore')), key=lambda p: -len(p))
+        rows = order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'), own)
+        par = lambda x: x['anc'][-1] if x['anc'] else None
+        sib = [x for x in rows if par(x) == par(r)]
+        i = next(k for k, x in enumerate(sib) if x is r)
+        lo, hi = i, i
+        while lo > 0 and sib[lo - 1]['type'] != 'space':
+            lo -= 1
+        while hi < len(sib) - 1 and sib[hi + 1]['type'] != 'space':
+            hi += 1
+        run = sib[lo:hi + 1]
+        rest = [x for x in run if x is not r]
+        pos = i - lo
+        shown = {id(x) for x in self.ordered()}
+        g = next((x for x in self.m.groups if x['id'] == par(r)), None)
+        return {'sib': sib, 'a': lo, 'b': hi, 'rest': rest, 'pos': pos, 'shown': shown, 'path': g['path'] if g else '',
+                'i': sum(1 for x in rest[:pos] if id(x) in shown), 'n': sum(1 for x in rest if id(x) in shown) + 1}
+
+    def c_order(self, a):
+        """edit.js order: your order of the dump's rows (the state's "order"): a signal or module moved among the rows of its
+        module shown (up, down, top, bottom, a number: 1 the first), module: its module; clear: all, or with signal its module's."""
+        mv = a.get('move')
+        if isinstance(mv, float) and mv.is_integer():
+            mv = int(mv)
+        if mv is not None and mv not in ('up', 'down', 'top', 'bottom') and not (isinstance(mv, int) and not isinstance(mv, bool) and mv >= 1):
+            fail('move: up, down, top, bottom or a number (1: the first)')
+        for k in ('module', 'clear'):
+            if a.get(k) is not None and not isinstance(a[k], bool):
+                fail(f'{k}: true or false')
+        own = own_order(self.st.get('order'))
+        r = None
+        if a.get('signal') is not None:
+            if not self.m.doc:
+                fail('order: the rows of the page are needed (a state alone: --model page.html)')
+            r = self.own_pick(str(a['signal']))
+            if not self.own_row(r):
+                fail(f'{r["full"]}: a row of your groups, a copy or a bit has no place of its own in the dump (group … move for yours)')
+            if a.get('module'):
+                p = next((g for g in self.m.groups if r['anc'] and g['id'] == r['anc'][-1]), None)
+                if not p:
+                    fail(f'{r["full"]}: at the top, no module')
+                r = p
+        if a.get('clear'):
+            if mv is not None:
+                fail('clear or move, not both')
+            path = self.own_place(r, own)['path'] if r else None
+            left = {} if path is None else {p: l for p, l in own.items() if p != path}
+            self.st['order'] = left
+            return {'cleared': len(own) - len(left)}
+        if r is None:
+            fail('order: a signal (with move), or clear')
+        P = self.own_place(r, own)
+        tag = own_keys(self.m.rows)[id(r)][len(r['name']):]   # a second row of its name: "#2"
+        place = lambda Q: {'signal': r['full'] + tag, 'module': Q['path'], 'at': Q['i'] + 1, 'of': Q['n']}
+        if mv is None:
+            return place(P)
+        rest, pos, shown = P['rest'], P['pos'], P['shown']
+        if isinstance(mv, int):
+            k = j = 0
+            while j < len(rest) and k < mv - 1:
+                k += id(rest[j]) in shown
+                j += 1
+            to = j
+        elif mv == 'top':
+            to = 0
+        elif mv == 'bottom':
+            to = len(rest)
+        elif mv == 'up':
+            k = pos - 1
+            while k >= 0 and id(rest[k]) not in shown:
+                k -= 1
+            to = k if k >= 0 else pos
+        else:
+            k = pos
+            while k < len(rest) and id(rest[k]) not in shown:
+                k += 1
+            to = k + 1 if k < len(rest) else pos
+        if to == pos:
+            return dict(place(P), moved=False)
+        rest.insert(to, r)
+        keys = own_keys(self.m.rows)
+        lst = [keys[id(x)] for x in P['sib'][:P['a']] + rest + P['sib'][P['b'] + 1:] if x['type'] != 'space']
+        self.st['order'] = {**own, P['path']: lst}
+        return dict(place(self.own_place(r, self.st['order'])), moved=True)
 
     def c_style(self, a):
         if a.get('name') is not None and a['name'] not in STYLES:
@@ -1726,8 +1893,9 @@ class Editor:
 
     def c_layout(self, a):
         """Where the rows scroll, the bar's tools folded, its short form, its arrangement, the strip over the time axis and the groups
-        placed (look.js setScroll, setTools, setToolsCompact, setToolLayout, setStripGroups, setToolAt, setCursorStrip, setStripAt): as
-        the state's maxHeight, toolsFolded, toolsCompact, toolLayout, stripGroups, toolAt, cursorStrip."""
+        placed, the scroll bar at the foot of the waves (look.js setScroll, setTools, setToolsCompact, setToolLayout, setStripGroups,
+        setToolAt, setCursorStrip, setStripAt, setScrollbar): as the state's maxHeight, toolsFolded, toolsCompact, toolLayout,
+        stripGroups, toolAt, cursorStrip, scrollbar."""
         def place_ok(p):
             return 0 <= p <= 1 if isinstance(p, (int, float)) and not isinstance(p, bool) else str(p).lower() in STRIP_AT
         if a.get('scroll') is not None and a['scroll'] not in ('window', 'page'):
@@ -1740,6 +1908,8 @@ class Editor:
             fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null')
         if a.get('strip') is not None and not isinstance(a['strip'], bool):
             fail('strip: true or false')
+        if a.get('scrollbar') is not None and not isinstance(a['scrollbar'], bool):
+            fail('scrollbar: true, false or null')
         if a.get('stripAt') is not None and not place_ok(a['stripAt']):
             fail('stripAt: 0 .. 1, "left", "center" or "right"')
         if a.get('stripGroups') is not None and not isinstance(a['stripGroups'], list):
@@ -1774,6 +1944,8 @@ class Editor:
             c['toolAt'] = ats
         if a.get('strip') is not None:
             c['cursorStrip'] = a['strip']
+        if 'scrollbar' in a:   # look.js setScrollbar: null the page's own
+            c['scrollbar'] = cfg.get('scrollbar') is not False if a['scrollbar'] is None else a['scrollbar']
         if a.get('stripAt') is not None:
             ats['cursor'] = ats['edges'] = strip_at(a['stripAt'])
             c['toolAt'] = ats
@@ -1784,7 +1956,8 @@ class Editor:
                 'bar': tool_lines(c['toolLayout'] if 'toolLayout' in c else self.m.cfg.get('toolLayout')),
                 'stripGroups': strip_names(c['stripGroups'] if 'stripGroups' in c else cfg.get('stripGroups', STRIP_GROUPS)), 'at': ats,
                 'strip': (c['cursorStrip'] if 'cursorStrip' in c else cfg.get('cursorStrip')) is not False,
-                'stripAt': ats['cursor'] if 'cursor' in ats else strip_at(cfg.get('cursorStripAt', 1))}
+                'stripAt': ats['cursor'] if 'cursor' in ats else strip_at(cfg.get('cursorStripAt', 1)),
+                'scrollbar': (c['scrollbar'] if 'scrollbar' in c else cfg.get('scrollbar')) is not False}
 
     def opt(self, k, default=None):
         """A setting as the viewer has it: the state's config, else the page's, else the default (wavelens.config.js)."""
@@ -1801,6 +1974,17 @@ class Editor:
         found = self.found(self.st['find'])   # (no "fold" written: the page folds what the find leaves out when it opens, B-19)
         return {'found': [r['full'] or r['name'] for r in found][:50], 'count': len(found),
                 'plugins': "not counted: a plugin's rows (the assertions) are the page's only"}
+
+    def c_sva(self, a):
+        """The Assertions panel's search (edit.js sva): its query and Mask as the state's svaFilter; what it finds is the page's."""
+        if a.get('filter') is not None and not isinstance(a['filter'], str):
+            fail(f'sva: filter is a text (name* @signal in:scope is:fail), not {json.dumps(a["filter"])}')
+        if a.get('mask') is not None and not isinstance(a['mask'], bool):
+            fail('sva: mask: true or false')
+        was = sva_filter(self.st['svaFilter'] if 'svaFilter' in self.st else self.opt('svaFilter')) or {'query': '', 'mask': False}
+        q = {'query': str(a['filter'] or '').strip() if 'filter' in a else was['query'], 'mask': bool(a['mask']) if 'mask' in a else was['mask']}
+        self.st['svaFilter'] = q if q['query'] or q['mask'] else None
+        return {'filter': q['query'], 'mask': q['mask'], 'errors': sva_query_errors(q['query'])}   # (its matches: the page's, live)
 
     def found(self, q):
         """view.js find: the rows the query matches, in display order (the rows of plugins, not known here, left out)."""
@@ -1906,6 +2090,7 @@ class Editor:
         bad = state_kinds(s)   # before anything is applied (view.js setState, B-45)
         if bad:
             fail(bad)
+        was = self.order_basis()
         for k, v in s.items():
             if k == 'config':
                 if isinstance(v, dict):
@@ -1916,6 +2101,18 @@ class Editor:
             self.st.pop('folds', None)
         self.st = clean_state(self.st)   # an entry that is no object left out, as the page does
         self.clamp_state()   # the times within the waves (B-44)
+        if 'order' in s:   # as the viewer keeps them (M-08): your order's lists of names, the runs' mode and window, the run shown
+            self.st['order'] = own_order(s['order'])
+        elif isinstance(s.get('config'), dict):   # another sort and no order: yours dropped (view.js setState, B-22)
+            self.order_check(was)
+        if 'runsMode' in s:
+            self.st['runsMode'] = 'open' if s['runsMode'] == 'open' else 'compare'
+        if 'runsOver' in s:
+            w = s['runsOver']
+            self.st['runsOver'] = ({'label': str(w.get('label') or ''), 'from': w['from'], 'to': w['to']}
+                                   if isinstance(w, dict) and finite(w.get('from')) and finite(w.get('to')) else None)
+        if 'compareShow' in s and s['compareShow'] not in (None, 'a', 'b', 'overlay'):
+            self.st.pop('compareShow', None)
         if 'dups' in s and self.m.doc:   # as the viewer keeps them: the copies of signals of these waves
             self.st['dups'] = [r['full'] for r in self.m.dup_rows(s)]
         if 'bits' in s and self.m.doc:   # as the viewer keeps them: the buses of these waves
@@ -1998,7 +2195,20 @@ class Editor:
     def c_compare(self, a):
         """A second dump over these waves (diff.js compareResult): result (sva diff's, as the WaveJSON "compare"), dump (a VCD or
         FST: sva diff of the view's dump, a, and it, over the view's window and rows; the page's file only), off: none; show: which
-        run the page opens with (a, b, overlay; compareView), alone or with result or dump."""
+        run the page opens with (a, b, overlay; compareView), alone or with result or dump. from, to: dump compared over that
+        window only (review 2026-11-18 M-03); go (the bar's Compare of what the page has picked) is the live page's."""
+        if a.get('mask') is not None and not isinstance(a['mask'], bool):
+            fail('mask: true or false')
+        if a.get('off') and a.get('mask') is not None:   # with off: the setting kept for the next compare (M-07: not ignored)
+            self.config()['compareMask'] = a['mask']
+        if a.get('go'):
+            fail('compare go: the live page\'s Compare (what it has picked, over its window in sight); here dump (with from, to) or result')
+        if (a.get('from') is None) != (a.get('to') is None):
+            fail('compare: from and to, or neither')
+        if a.get('from') is not None and not a.get('dump'):
+            fail('compare: from and to are of dump here (the live page: of go too)')
+        if a.get('from') is not None and not self.time(a['to'], 'to') > self.time(a['from'], 'from'):
+            fail('compare: "to" is not after "from"')
         if a.get('off'):
             self.st['compare'] = None
             self.st.pop('compareShow', None)
@@ -2016,7 +2226,7 @@ class Editor:
         if show is not None and a.get('result') is None and not a.get('dump'):
             c = self.compare()
             if c is None:
-                fail(f'compare {show}: compare with a second dump first (Compare… in the bar)')
+                fail(f'compare {show}: compare with a second dump first (a dump or a result here; on the page: File ▾ → Compare with…, then Compare)')
             self.compare_show(show, c)
             return {'show': show, 'name': c.get('name') or 'B'}
         if a.get('result') is not None:
@@ -2084,14 +2294,37 @@ def collate(s):
 
 
 def own_order(o):
-    """model.js ownOrder: your order as the state keeps it, a module's path -> its rows' names; a list of none left out."""
+    """model.js ownOrder: your order as the state keeps it, a module's path -> its rows' keys; a list of none left out."""
     return {p: [str(n) for n in l] for p, l in (o.items() if isinstance(o, dict) else ()) if isinstance(l, list) and l}
+
+
+def own_keys(rows):
+    """model.js ownKeys: a row's key in your order, its name among its siblings in the file's order; the second and later
+    of one name "valid#2", "valid#3" -> {id(row): key}."""
+    n, out = {}, {}
+    for r in rows:
+        if r['type'] == 'space':
+            continue
+        k = (r['anc'][-1] if r['anc'] else None, r['name'])
+        n[k] = n.get(k, 0) + 1
+        out[id(r)] = r['name'] if n[k] == 1 else f"{r['name']}#{n[k]}"
+    return out
+
+
+def own_list(lst):
+    """model.js ownList: a list of your order as read, 0.62's plain names (one name twice: the second is "name#2") as keys."""
+    have, seen, out = set(lst), {}, []
+    for x in lst:
+        seen[x] = seen.get(x, 0) + 1
+        k = f'{x}#{seen[x]}'
+        out.append(k if seen[x] > 1 and k not in have else x)
+    return out
 
 
 def order_rows(rows, sort, pfx, group_order, own=None):
     """model.js orderRows: siblings (between spacers) sorted by name without the ignored prefixes; groups move as a block;
-    own (your order, alt+up / down in the names): a module's path ('' the top) -> its rows' names, the places of the rows
-    it names in each run filled again in its order."""
+    own (your order, alt+up / down in the names): a module's path ('' the top) -> its rows' keys (own_keys), the places of
+    the rows it names in each run filled again in its order."""
     sorting, gs = sort in ('asc', 'desc'), -1 if group_order == 'first' else 1 if group_order == 'last' else 0
     if not sorting and not gs and not own:
         return list(rows)
@@ -2106,15 +2339,17 @@ def order_rows(rows, sort, pfx, group_order, own=None):
     def cmp(a, b):
         g = gs * ((a['type'] == 'group') - (b['type'] == 'group'))
         return g or (sgn * (c(strip(a['name']), strip(b['name'])) or c(a['name'], b['name'])) if sorting else 0)
+    keys = own_keys(rows) if own else {}
+    key = lambda r: keys.get(id(r))
     def yours(run, path):
         lst = (own or {}).get(path)
         if not lst:
             return run
         at = {}
-        for i, n in enumerate(lst):
+        for i, n in enumerate(own_list(lst)):
             at.setdefault(n, i)
-        k = [i for i, r in enumerate(run) if r['name'] in at]
-        put = sorted((run[i] for i in k), key=lambda r: at[r['name']])
+        k = [i for i, r in enumerate(run) if key(r) in at]
+        put = sorted((run[i] for i in k), key=lambda r: at[key(r)])
         for i, r in zip(k, put):
             run[i] = r
         return run
@@ -2200,11 +2435,16 @@ def edit_page(path, ops, view=None):
 
 
 def compare_summary(c):
-    """What the command compare answers (as the page's): {name, compared, differ, first, missing}; compared: the signals of the
-    result (the page counts its rows among them: a row it does not show is not compared there)."""
+    """What the command compare answers (as the page's): {name, compared, differ, first, missing, from, to, asked?}; compared: the
+    signals of the result (the page counts its rows among them: a row it does not show is not compared there); from … to the
+    time compared — since 0.62 a compare is of a window, "differ 0" is of that window only (review 2026-11-18 M-01); asked: the
+    window Compare asked, when one was."""
     sigs = c.get('signals') or {}
-    return {'name': c.get('name') or 'B', 'compared': len(sigs), 'differ': sum(1 for x in sigs.values() if (x or {}).get('spans')),
-            'first': c.get('first'), 'missing': len(c.get('missing') or [])}
+    out = {'name': c.get('name') or 'B', 'compared': len(sigs), 'differ': sum(1 for x in sigs.values() if (x or {}).get('spans')),
+           'first': c.get('first'), 'missing': len(c.get('missing') or []), 'from': c.get('from'), 'to': c.get('to')}
+    if isinstance(c.get('asked'), dict):
+        out['asked'] = {k: c['asked'].get(k) for k in ('from', 'to')}
+    return out
 
 
 def row_hits(r, paths, tails, scope):
@@ -2256,13 +2496,30 @@ def compare_dump(model, base, a):
     pick = lambda full, hit: max(hit, key=lambda p: (votes[p[:len(p) - len(full) - 1]], -p.count('.')))
     rows = [(full, pick(full, hit) if hit else full) for full, hit in found]
     t0, t1 = meta.get('from_ps', model.t0), meta.get('to_ps', model.t1)
+    win = window_of(a)   # from … to: that window only (review 2026-11-18 M-03)
+    if win:
+        t0, t1 = max(win[0], t0) if finite(t0) else win[0], min(win[1], t1) if finite(t1) else win[1]
     off = a.get('offset')
     if off not in (None, ''):
         t = parse_t(off) if isinstance(off, str) else off
         if not finite(t):
             fail(f'compare: offset "{off}" is not a time')
         off = f'{round(t)}ps'
-    return svabuild.compare(exe, dump_a, dump_b, rows, t0, t1, a.get('map'), off)
+    res = svabuild.compare(exe, dump_a, dump_b, rows, t0, t1, a.get('map'), off)
+    if win:
+        res['asked'] = {'from': win[0], 'to': win[1]}
+    return res
+
+
+def window_of(a):
+    """A compare's from … to (ps: a number, or a text with a unit) -> (from, to), None without them."""
+    if a.get('from') is None and a.get('to') is None:
+        return None
+    t = lambda x: x if isinstance(x, (int, float)) and not isinstance(x, bool) else parse_t(x) if isinstance(x, str) else None
+    p, q = t(a.get('from')), t(a.get('to'))
+    if not (finite(p) and finite(q) and q > p):
+        fail(f'compare: from {a.get("from")} … to {a.get("to")} is no window')
+    return p, q
 
 
 def edit_state(path, ops, model=None):
@@ -2291,9 +2548,10 @@ def edit_state(path, ops, model=None):
 # the commands a config's "state" of a view takes (the view's state as the page opens: the Editor of a page's edits on it); not what a
 # session is (the cursors, the range, the selection, the find, Only, the FSM layer, the order) nor what reads the page
 STATE_OPS = [k for k in COMMANDS if k not in LIVE_ONLY and k not in CONFIG_OPS and k not in
-             ('cursor', 'cursor2', 'range', 'select', 'find', 'only', 'fsm', 'sort', 'reset', 'state', 'rows', 'picture', 'compare', 'view', 'fold', 'unfold')]
+             ('cursor', 'cursor2', 'range', 'select', 'find', 'only', 'fsm', 'sort', 'order', 'reset', 'state', 'rows', 'picture', 'compare', 'view', 'fold',
+              'unfold')]
 # what --from-page takes of a page's state into its config: what this browser keeps of a viewer, the expressions
-FROM_PAGE = ['groups', 'paint', 'radix', 'analog', 'hidden', 'dups', 'bits', 'markers', 'deltas', 'spans', 'bookmarks', 'arrows', 'exprs']
+FROM_PAGE = ['groups', 'paint', 'radix', 'analog', 'hidden', 'order', 'dups', 'bits', 'markers', 'deltas', 'spans', 'bookmarks', 'arrows', 'exprs']
 
 
 def config_ops(view, ops):
@@ -2383,7 +2641,7 @@ def edit_config(path, ops, view=None, from_page=None, keys=None):
     return res, view, changed
 
 
-PAGE_CFG = ['style', 'maxHeight', *ALL_GAP_KEYS, *CYC_KEYS]   # the settings of a page's state a config keeps (edit.js KEPT_CFG)
+PAGE_CFG = ['style', 'maxHeight', 'scrollbar', *ALL_GAP_KEYS, *CYC_KEYS]   # the settings of a page's state a config keeps (edit.js KEPT_CFG)
 
 
 def page_into(work, page, view, keys=None, waves=None):

@@ -6,9 +6,11 @@ A pixel differs when one of its channels moves by more than --tol (default 32 of
 machine's fonts stays under it) from the pixel there and from the 8 around it (text placed a pixel off is the same); a picture differs when more than --max pixels do (default 48: fewer than a changed
 letter; a share of the picture would let a word through in a big one) or its size is another. For each one that
 differs a picture of the difference (the new one faded, the pixels that moved in red) goes to --diff. A picture made
-(in GOT) that is not in WANT fails too: a shot added and not committed.
+(in GOT) that is not in WANT fails too: a shot added and not committed. --skip NAME: a committed picture no script makes
+(made by hand: the guides' vscode-fsm.png); --made: only the pictures made are compared (a run of some of the shots).
 
-  python3 -I tests/pngdiff.py WANT_DIR GOT_DIR [--diff DIR] [--tol 32] [--max 48]   exit 1: a picture differs, is missing or new
+  python3 -I tests/pngdiff.py WANT_DIR GOT_DIR [--diff DIR] [--tol 32] [--max 48] [--skip NAME] [--made] [--how TEXT]
+  exit 1: a picture differs, is missing or new
 """
 import argparse, os, struct, sys, zlib
 
@@ -99,9 +101,12 @@ def main():
     ap.add_argument('--diff', help='the pictures of the differences (default: GOT/diff)')
     ap.add_argument('--tol', type=int, default=32)
     ap.add_argument('--max', type=int, default=48, help='the pixels that may differ in a picture (default: %(default)s)')
+    ap.add_argument('--skip', action='append', default=[], help='a committed picture no script makes (made by hand): not compared')
+    ap.add_argument('--made', action='store_true', help='only the pictures made in GOT are compared (some of the shots made)')
+    ap.add_argument('--how', default='make shots', help='how they are made again, for the message (default: %(default)s)')
     a = ap.parse_args()
     dd = a.diff or os.path.join(a.got, 'diff')
-    names = sorted(f for f in os.listdir(a.want) if f.endswith('.png'))
+    names = sorted(f for f in os.listdir(a.want) if f.endswith('.png') and f not in a.skip and (not a.made or os.path.exists(os.path.join(a.got, f))))
     bad, near = [], []
     for f in names:
         g = os.path.join(a.got, f)
@@ -117,11 +122,11 @@ def main():
         else:
             near.append(f'{f} ({n} px)')
     new = sorted(set(f for f in os.listdir(a.got) if f.endswith('.png')) - set(names))
-    bad += [f'{f}: made, not in {a.want} (a new shot: make shots, then commit it)' for f in new]
+    bad += [f'{f}: made, not in {a.want} (a new shot: {a.how}, then commit it)' for f in new]
     if near:
         print(f'pngdiff: {a.want}: within the tolerance: {", ".join(near)}')
     if bad:
-        print(f'pngdiff: {a.want}: {len(bad)} of {len(names)} pictures differ (the differences in {dd}; meant: make shots, then commit them):\n  ' +
+        print(f'pngdiff: {a.want}: {len(bad)} of {len(names)} pictures differ (the differences in {dd}; meant: {a.how}, then commit them):\n  ' +
               '\n  '.join(bad))
         sys.exit(1)
     print(f'pngdiff: {a.want}: the {len(names)} pictures are current')

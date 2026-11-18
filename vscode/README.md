@@ -15,8 +15,9 @@ is turned into VCD text with it, kept in the extension's storage).
   FST once, kept): over the whole dump as a summary, a busy signal (a clock) as a bar where it changes more often than the
   screen shows, its value there `…`; zoomed in, the view is read again exactly (a 20 µs view of a 200 ms clock: 0.3 s).
   Assertions, the FSM panel and pictures read what they need first. An FST a new run wrote over is
-  not read under the old header: the tab says so once, ⟳ reads it again. With no sva CLI on the host (Windows without
-  `wavelens.sva`) a VCD is read whole instead, the tab says why; an FST needs the CLI. **WaveLens: Set the sva program…**
+  not read under the old header: the tab says so once, ⟳ reads it again. With no sva CLI that runs on the host (the package
+  carries Linux x86-64 and Windows x86-64; macOS or arm64 without `wavelens.sva`) a VCD of 256 MB at most is read whole
+  instead, the tab says why; a larger one is refused, and an FST needs the CLI. **WaveLens: Set the sva program…**
   (offered then, also in the tab's ⋯ menu) lists the sva programs found on the machine, each tried, or a file you pick,
   and sets `wavelens.sva`.
 - **A tab in a window of its own** (*Move into New Window*, *Copy into New Window*): VS Code makes its page again; the dump is
@@ -30,15 +31,17 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
   pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **A piece of the waves** (the right button on a range: *Save as WaveLens (JSON)*): `x.wavelens.json` opens in a tab
-  of its own (*Open in WaveLens*), its view with it. *Slice ▸* keeps the range as a run of its own whose times start at 0
-  (pieces compared with each other from their first sample in the Runs panel; with the dump, a whole run or a file of
-  Compare…: at its place in it), or saves it as an FST.
+  of its own (*Open in WaveLens*), its view with it. *Range ▸ Keep as a slice (Runs)* keeps the range as a run of its own whose
+  times start at 0 (pieces compared with each other from their first sample in the Runs panel; with the dump, a whole run or a
+  file of Compare…: at its place in it); *Range ▸ Save as FST…* saves it as an FST of its own.
 - **The runs kept** (Runs…, `gu`, *WaveLens: The runs kept of this dump*): keep the dump of now with a name, tags and a comment
   (an FST in `.wavelens-runs` beside it). The list holds the dump of now and the runs; two rows carry a letter: **A**, the
-  waves shown in the tab (`w`: a run's waves read here, the window and rows kept; `]w` `[w` walk through the runs), and **B**,
-  the run compared with A (a click, `]r` `[r`; `x`: none, the waves only) — or Δ all of them against A — over the waves in
-  sight or a span of yours (a test case: each run's case of that name, wherever it is in the run): only that window of a run
-  is read, by `sva` on the host. The panel's switch **Compare | Open** (`o`): in Open a row chosen opens its waves, one run
+  waves shown in the tab, and **B**, the run compared with it. `w` picks a run as A, a click (`]r` `[r`) one as B — picked
+  only, nothing read; **Compare** (`c` in the list, the panel's and the bar's Compare, `g=`) opens A's waves when it is a run
+  picked (the window and rows kept) and compares B with it over the waves in sight or a span of yours (a test case: each
+  run's case of that name, wherever it is in the run); zoomed or panned since, Compare is lit until pressed again. `]w` `[w`
+  walk through the runs' waves at once; `x`: no B, the waves only; Δ all: every run against A. Only that window of a run is
+  read, by `sva` on the host. The panel's switch **Compare | Open** (`o`): in Open a row chosen opens its waves, one run
   after another, nothing compared. A row shows the run's comment and tags (a colour per tag); **↔** on a slice's row puts
   the window and the range on its span; the panel's last line is the runs' directory, its **★** writes `wavelens.runsDir`.
 - **An agent** (Claude Code, Codex with `tools/wavemcp.py`) on the same host: when it starts its live link

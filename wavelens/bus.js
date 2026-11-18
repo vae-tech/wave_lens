@@ -514,7 +514,7 @@ class Buses {
     // the selected transaction in a saved viewer state: its port and its start
     v.extraState.push({ key: 'bus', get: () => (this.sel && this.selPort ? { port: this.selPort.key, t0: this.sel.t0 } : undefined),
       set: s => { const p = s && this.list().find(q => q.key === s.port), x = p && p.D.tx.find(q => q.t0 === s.t0); if (x) this.select(p, x); } });
-    v.root.addEventListener('wavelens:settings', () => { this.ports = null; if (this.txl) this.txl.render(); }, { signal: v.ac.signal });
+    v.root.addEventListener('wavelens:settings', () => { this.ports = null; this.read = false; if (this.txl) this.txl.render(); }, { signal: v.ac.signal });
     this.txl = v.notesEl ? new TxList(this) : null;
     if (this.txl) setTimeout(() => { if (v.root.isConnected) this.txl.render(); }, 0);
   }
@@ -538,8 +538,10 @@ class Buses {
     const v = this.v, ports = findPorts(v.M, v.S), base = r => { const q = r.orig || r; return q.dupOf || q.of || q; };
     const rowsOf = p => Object.values(p.sig).concat(p.clk ? [p.clk] : []).filter(Boolean).map(base);
     if (v.lazy && v.needWhole && !this.read && ports.some(p => rowsOf(p).some(r => r.lazy || r.sum))) {
-      this.read = true;   // once: the rows read whole (the ones that can be), the ports found and decoded again then
-      v.needWhole(ports.flatMap(rowsOf), 'the bus decoder').catch(() => {}).then(() => {
+      // once: the rows read whole port by port (one that cannot be read or is too busy leaves the others theirs: review
+      // 2026-11-18 B-17), the ports found and decoded again then
+      this.read = true;
+      Promise.all(ports.map(p => v.needWhole(rowsOf(p), 'the bus decoder').catch(() => {}))).then(() => {
         if (!v.root.isConnected || v.buses !== this) return;
         this.ports = null; if (this.txl) this.txl.render(); v.renderNames(); v.draw(); });
       return [];
@@ -547,7 +549,10 @@ class Buses {
     this.ports = ports.map(p => {
       p.D = decode(p, v);
       const busy = rowsOf(p).find(r => r.lazy || r.sum);
-      const why = busy && `${busy.full} ${busy.lazy ? 'not read' : 'changes too often to read whole here (a large dump)'}: its transfers are not decoded`;
+      const busyN = busy && busy.sum && busy.sum.part ? busy.sum.part.n : 0;
+      const how = !busy ? '' : busy.lazy || busy.unread ? 'not read' + (busy.unread && typeof busy.unread === 'string' ? ` (${busy.unread})` : '')
+        : busyN > v.S.lazyWhole ? 'changes too often to read whole here (a large dump)' : 'not read whole';
+      const why = busy && `${busy.full} ${how}: its transfers are not decoded`;
       if (busy) p.D = Object.assign({}, p.D, { tx: [], ch: [], why });
       return p;
     });

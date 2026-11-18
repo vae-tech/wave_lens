@@ -22,6 +22,7 @@
     stripGroups: ['array', 'string'],       // ['find', 'cursor'] | 'find, cursor'
     toolAt: ['object'],                     // {"marks": 0.5} | null
     svaSignals: ['string', 'boolean'],      // 'view' | true | false
+    svaFilter: ['string', 'object'],        // 'apb_* is:fail' | {query, mask} | null
     fontMono: ['string'], fontBody: ['string'],
     enumColors: ['object'], groupColors: ['object'], buses: ['array'],
     fold: ['boolean', 'number', 'array', 'string'],   // true | a depth | ['group.path', …] (or "a, b")

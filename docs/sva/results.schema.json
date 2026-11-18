@@ -31,8 +31,8 @@
         "cycles": { "type": "array", "items": { "type": "integer" }, "description": "With clock: its own sampling times." },
         "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
         "stats": { "$ref": "#/$defs/stats" },
-        "attempts": { "type": "array", "items": { "$ref": "#/$defs/attempt" }, "description": "Every non-vacuous attempt by start (covers: the first cover_traces matches)." },
-        "lane": { "type": "string", "description": "One character per cycle, . S P C D F; derived from the attempts (a cache)." },
+        "attempts": { "type": "array", "items": { "$ref": "#/$defs/attempt" }, "description": "The non-vacuous attempts by start (covers: the first cover_traces matches); without listed every one, with listed a part (the passes counted only, the list cut at max_listed: the failures first)." },
+        "lane": { "type": "string", "description": "One character per cycle, . S P C D F, of every attempt (the ones listed and the ones only counted: with listed it is more than the attempts show)." },
         "missing": { "type": "array", "items": { "type": "string" }, "description": "Signals not in the trace: not evaluated." },
         "notes": { "type": "array", "items": { "type": "string" } },
         "cycle_runs": { "type": "array", "items": { "type": "array", "items": { "type": "integer" } }, "description": "With clock, --cycle-runs: its own times as runs." },
@@ -46,9 +46,10 @@
       "description": "attempts is not every non-vacuous attempt (sva eval --no-pass, --max-attempts): what it leaves out.",
       "properties": {
         "passes": { "type": "boolean", "description": "The passing attempts are listed (false: counted only)." },
-        "of": { "type": "integer", "description": "The attempts before the list was cut." },
+        "of": { "type": "integer", "description": "The attempts there were before the list was cut (max_listed, sva eval --max-attempts): the failures listed first, the first by start." },
         "longest": { "type": "array", "items": { "type": "integer" }, "description": "The longest decided attempt of all: [cycles, start]." },
-        "last_fail": { "$ref": "#/$defs/attempt", "description": "The failure found last of all." }
+        "first_fail": { "$ref": "#/$defs/attempt", "description": "A cut list: the failure found first of all (the earliest failed_at), listed or not." },
+        "last_fail": { "$ref": "#/$defs/attempt", "description": "A cut list: the failure found last of all (the latest failed_at)." }
       }
     },
     "step": {

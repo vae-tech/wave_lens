@@ -402,6 +402,22 @@ class Commands(unittest.TestCase):
         self.assertIn('give signal', bad[0]['error'])
         self.assertEqual(len(e.st['markers']), n)   # nothing made of them
 
+    def test_sva_filter(self):
+        """sva: the Assertions panel's search as the state's svaFilter (sva.js setFilter): the query, the Mask apart, the terms not
+        understood said; the setting svaFilter where the state has none; none at all: null; a wrong kind refused."""
+        e = ed(settings={'svaFilter': 'apb_*'})
+        self.assertEqual(self.run_ok(e, {'op': 'sva', 'mask': True})[0], {'op': 'sva', 'filter': 'apb_*', 'mask': True, 'errors': []})
+        r = self.run_ok(e, {'op': 'sva', 'filter': '  @PREADY is:fail,nope ! '})[0]
+        self.assertEqual((e.st['svaFilter'], r['errors']), ({'query': '@PREADY is:fail,nope !', 'mask': True},
+                         ['"is:fail,nope": nope is no state (fail pass vacuous cover assert assume unbound error capped running)', '"!": a name after !']))
+        self.run_ok(e, {'op': 'sva', 'filter': None, 'mask': False})
+        self.assertIsNone(e.st['svaFilter'])
+        bad = e.run([{'op': 'sva', 'filter': 5}, {'op': 'sva', 'mask': 'yes'}, {'op': 'sva', 'query': 'x'}])
+        self.assertTrue(all('error' in x for x in bad), bad)
+        self.assertEqual([V.sva_query_errors(q) for q in ('@', 'in:', 'IS:Fail !is:cover a,b @*.u_dut.p*')],
+                         [['"@": a signal after @'], ['"in:": an instance after in:'], []])
+        self.assertEqual(V.sva_filter({'query': ' x ', 'mask': 1}), {'query': 'x', 'mask': True})
+
 
 class Twin(unittest.TestCase):
     """What edit.js does, the same here (review 2026-10-22: A9/B4, M4, B13, B14, B15)."""
@@ -481,7 +497,7 @@ class Twin(unittest.TestCase):
         r = e.run([{'op': 'layout', 'height': 400}, {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'find', 'query': 'dut.st'},
                    {'op': 'find', 'query': 'val|clk', 'regex': True}, {'op': 'find', 'query': 'state', 'word': True, 'regex': False},
                    {'op': 'cycles', 'on': True}])
-        sd = {'stripGroups': ['find', 'marks', 'cursor', 'edges'], 'at': {}, 'strip': True, 'stripAt': 1}   # the strip and the places (wavelens.config.js)
+        sd = {'stripGroups': ['find', 'marks', 'cursor', 'edges'], 'at': {}, 'strip': True, 'stripAt': 1, 'scrollbar': True}   # the strip and the places (wavelens.config.js)
         self.assertEqual(r[0], {'op': 'layout', 'scroll': 'window', 'height': 400, 'tools': 'open', 'compact': 'auto', 'bar': None, **sd})
         self.assertEqual(r[1], {'op': 'layout', 'scroll': 'page', 'height': None, 'tools': 'fold', 'compact': 'auto', 'bar': None, **sd})
         # the strip's groups and the places (look.js setStripGroups, setToolAt, 0.53's setCursorStrip, setStripAt); what is wrong said
@@ -847,12 +863,18 @@ class Compare(unittest.TestCase):
     def test_result_and_off(self):
         res = {'name': 'b.vcd', 'from': 0, 'to': 80000, 'signals': {'tb.dut.valid': {'spans': [[20000, 40000]]}, 'clk': {'spans': []}}, 'missing': ['tb.dut.data']}
         e = ed()
-        self.assertEqual(e.run([{'op': 'compare', 'result': res}])[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': None, 'missing': 1})
+        self.assertEqual(e.run([{'op': 'compare', 'result': res}])[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': None, 'missing': 1,
+                                                                       'from': 0, 'to': 80000}, 'the window compared with it (review 2026-11-18 M-01)')
         self.assertEqual(e.st['compare'], res)
         self.assertEqual(dict(zip(*zip(*[(r[0], r[2:]) for r in e.c_rows({})['rows']])))['tb.dut.valid'], ['≠'])
         self.assertEqual(e.run([{'op': 'compare', 'off': True}])[0], {'op': 'compare', 'off': True})
         self.assertIsNone(e.st['compare'])
         self.assertIn('result, show, dump, mask or off', e.run([{'op': 'compare'}])[0]['error'])
+        # review 2026-11-18 M-03: go is the live page's; from … to are of dump here, both or neither
+        self.assertIn('live page', e.run([{'op': 'compare', 'go': True}])[0]['error'])
+        self.assertIn('of dump here', e.run([{'op': 'compare', 'from': 0, 'to': 10}])[0]['error'])
+        self.assertIn('or neither', e.run([{'op': 'compare', 'dump': 'b.vcd', 'from': 0}])[0]['error'])
+        self.assertIn('not after', e.run([{'op': 'compare', 'dump': 'b.vcd', 'from': '20ns', 'to': '10ns'}])[0]['error'])
         self.assertEqual(e.run([{'op': 'compare', 'mask': False}])[0], {'op': 'compare', 'mask': False})   # diff.js compareMask
         self.assertIs(e.config()['compareMask'], False)
         self.assertIn('true or false', e.run([{'op': 'compare', 'mask': 'off'}])[0]['error'])
@@ -881,7 +903,11 @@ class Compare(unittest.TestCase):
             rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', page, '--no-sva')
             self.assertEqual(rc, 0, err)
             res, key, rev = V.edit_page(page, [{'op': 'compare', 'dump': 'b.vcd'}])
-            self.assertEqual(res[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': 10000, 'missing': 0}, res)
+            self.assertEqual(res[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': 10000, 'missing': 0, 'from': 0, 'to': 30000}, res)
+            # M-03: over a window only — the difference at 10 ns outside 20 … 30 ns: none, the window said
+            w = V.edit_page(page, [{'op': 'compare', 'dump': 'b.vcd', 'from': '20ns', 'to': '30ns'}])[0][0]
+            self.assertEqual((w['differ'], w['from'], w['to'], w['asked']), (0, 20000, 30000, {'from': 20000, 'to': 30000}), w)
+            res, key, rev = V.edit_page(page, [{'op': 'compare', 'dump': 'b.vcd'}])
             st = V.Page(page).state(key)['compare']
             self.assertEqual(st['signals']['v'], {'spans': [[10000, 15000]], 'b': 'tb.v'}, 'v of the page is tb.v, not tb.u.v')
             # the cut of B for the page's A B A+B: the signals that differ only, their values, over the page's window
@@ -1456,3 +1482,115 @@ class Bughunt1110Parity(unittest.TestCase):
         self.assertEqual({k: r[0]['gaps'][k] for k in ('gapIdle', 'gapKeep', 'gapSignals', 'gapAux', 'gapCount')},
                          {'gapIdle': '100ns', 'gapKeep': 0, 'gapSignals': ['clk', 'valid'], 'gapAux': ['state'], 'gapCount': 'rise'})
         self.assertEqual((e.st['config']['gapSignals'], e.st['config']['gapAux']), (['clk', 'valid'], ['state']))
+
+
+class Review1118(unittest.TestCase):
+    """The review of 2026-11-18: your order of the rows (B-04, A-03, B-21, B-22, M-05), --from-page (M-04), the mask and the scroll
+    bar (M-07), bad values (M-08)."""
+    NAMESAKES = {'signal': [{'name': 'clk', 'wave': 'p......'}, {'name': 'valid', 'wave': '01..0..'}, {'name': 'data', 'wave': 'x3..x..', 'data': ['A']},
+                            {'name': 'valid', 'wave': '0.1.0..'}, {'name': 'data', 'wave': 'x.4.x..', 'data': ['B']}, {'name': 'ready', 'wave': '1......'},
+                            ['grp', {'name': 'q', 'wave': '01.....'}, {'name': 'q', 'wave': '10.....'}, {'name': 'z', 'wave': '0.1....'}],
+                            ['ready', {'name': 'm', 'wave': '0'}]]}
+
+    def rows(self, e):
+        return [r[0] + ':' + str(r[1]) for r in e.run([{'op': 'rows'}])[0]['rows']]
+
+    def test_namesakes_keyed(self):
+        """B-04: two rows of one name in a module keep their own places: the second is "name#2" in the order; 0.62's plain names read."""
+        e = ed(doc=self.NAMESAKES)
+        r = e.run([{'op': 'order', 'signal': 'ready', 'move': 'up'}])[0]
+        self.assertIn('the second is "ready#2"', r['error'])
+        r = e.run([{'op': 'order', 'signal': 'grp.q#2', 'move': 'top'}, {'op': 'order', 'signal': 'grp.q', 'move': 'up'}])
+        self.assertEqual(r[0], {'op': 'order', 'signal': 'grp.q#2', 'module': 'grp', 'at': 1, 'of': 3, 'moved': True})
+        self.assertIn('error', r[1])
+        self.assertEqual(e.st['order'], {'grp': ['q#2', 'q', 'z']})
+        e.run([{'op': 'order', 'signal': 'ready#2', 'move': 1}])
+        self.assertEqual(e.st['order'][''], ['ready#2', 'clk', 'valid', 'data', 'valid#2', 'data#2', 'ready', 'grp'])
+        self.assertEqual(self.rows(e)[:3], ['ready:module', 'ready.m:1', 'clk:1'])
+        e = ed(doc=self.NAMESAKES, state={'order': {'': ['clk', 'valid', 'data', 'valid', 'ready', 'data']}})   # a state of 0.62
+        self.assertEqual(V.own_list(['clk', 'valid', 'data', 'valid', 'ready', 'data']), ['clk', 'valid', 'data', 'valid#2', 'ready', 'data#2'])
+        self.assertEqual([x['name'] for x in e.ordered()][:6], ['clk', 'valid', 'data', 'valid', 'ready', 'data'])
+        self.assertEqual(V.own_list(['a', 'a#2', 'a']), ['a', 'a#2', 'a'], 'a list that names "a#2" itself: as it is')
+
+    def test_order_command(self):
+        """M-05: the command order — a place (a number, top, bottom), the module of a signal, its answer, clear; bad ones refused."""
+        doc = {'signal': [['top', {'name': 'a', 'wave': '01'}, {'name': 'b', 'wave': '01'}, ['sub', {'name': 'x', 'wave': '0'}], {'name': 'c', 'wave': '1'}],
+                          {'name': 'z', 'wave': '0'}]}
+        e = ed(doc=doc)
+        r = e.run([{'op': 'order', 'signal': 'top.c', 'move': 1}, {'op': 'order', 'signal': 'x', 'module': True, 'move': 'bottom'},
+                   {'op': 'order', 'signal': 'top.b'}, {'op': 'order', 'signal': 'top.c', 'move': 'up'}, {'op': 'order', 'signal': 'a', 'move': 0},
+                   {'op': 'order', 'signal': 'a', 'move': 'sideways'}, {'op': 'order'}, {'op': 'order', 'signal': 'z', 'module': True},
+                   {'op': 'order', 'clear': True, 'move': 'up'}])
+        self.assertEqual(r[0], {'op': 'order', 'signal': 'top.c', 'module': 'top', 'at': 1, 'of': 4, 'moved': True})
+        self.assertEqual((r[1]['signal'], r[1]['at']), ('top.sub', 4))
+        self.assertEqual(r[2], {'op': 'order', 'signal': 'top.b', 'module': 'top', 'at': 3, 'of': 4})
+        self.assertEqual(r[3]['moved'], False, 'the first: no place up')
+        for x in r[4:]:
+            self.assertIn('error', x)
+        self.assertEqual(e.st['order'], {'top': ['c', 'a', 'b', 'sub']})
+        e.run([{'op': 'hide', 'signals': 'top.a'}])   # a hidden row is no place: down from c goes past a to b
+        self.assertEqual(e.run([{'op': 'order', 'signal': 'top.c', 'move': 'down'}])[0]['at'], 2)
+        self.assertEqual(e.st['order'], {'top': ['a', 'b', 'c', 'sub']})
+        self.assertEqual(e.run([{'op': 'order', 'signal': 'top.c', 'clear': True}])[0], {'op': 'order', 'cleared': 1})
+        self.assertEqual(e.st['order'], {})
+        self.assertIn('error', ed().run([{'op': 'duplicate', 'signals': 'clk'}, {'op': 'order', 'signal': 'clk#2', 'move': 'up'}])[1])   # a copy
+        self.assertIn('error', V.Editor(V.Model(), {}).run([{'op': 'order', 'signal': 'a', 'move': 'up'}])[0])   # no rows
+
+    def test_sort_drops_and_says(self):
+        """M-05, B-22: sort answers orderDropped; a state of another sort and no order drops yours, one with an order takes it; new prefixes too."""
+        e = ed(doc=self.NAMESAKES, state={'order': {'': ['ready', 'clk']}})
+        self.assertNotIn('orderDropped', e.run([{'op': 'sort', 'dir': 'none'}])[0])
+        self.assertEqual(e.run([{'op': 'sort', 'dir': 'asc'}])[0]['orderDropped'], 1)
+        e = ed(doc=self.NAMESAKES, state={'order': {'': ['ready', 'clk']}})
+        self.assertEqual(e.run([{'op': 'sort', 'dir': 'none', 'ignore': 'x_'}])[0]['orderDropped'], 1)
+        e = ed(doc=self.NAMESAKES, state={'order': {'': ['ready', 'clk']}})
+        e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'config': {'sort': 'desc'}}}])
+        self.assertEqual(e.st['order'], {})
+        e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'config': {'sort': 'none'}, 'order': {'': ['ready']}}}])
+        self.assertEqual(e.st['order'], {'': ['ready']})
+
+    def test_state_as_the_page_keeps_it(self):
+        """M-08: set_state keeps what the page would — the runs' mode and window, the run shown, your order's lists of names."""
+        e = ed()
+        e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'runsMode': 'bogus', 'runsOver': 'x', 'compareShow': 'zz', 'order': {'tb': 'PSEL', 'm': ['a', 2]}}}])
+        self.assertEqual((e.st['runsMode'], e.st['runsOver'], 'compareShow' in e.st, e.st['order']), ('compare', None, False, {'m': ['a', '2']}))
+        e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'runsMode': 'open', 'runsOver': {'from': 1, 'to': 2, 'x': 1}}}])
+        self.assertEqual((e.st['runsMode'], e.st['runsOver']), ('open', {'label': '', 'from': 1, 'to': 2}))
+
+    def test_bad_values(self):
+        """M-08: a rename of no group makes none, a rename or a label that is no text is refused."""
+        e = ed()
+        r = e.run([{'op': 'group', 'name': 'nope', 'rename': 'G3'}, {'op': 'group', 'name': 'g', 'signals': 'clk'}, {'op': 'group', 'name': 'g', 'rename': 7},
+                   {'op': 'bookmark', 't': '10ns', 'label': {'a': 1}}, {'op': 'bookmark', 't': '10ns', 'text': {'x': 1}}, {'op': 'bookmark', 't': '10ns', 'label': 5}])
+        self.assertEqual(['error' in x for x in r], [True, False, True, True, True, False])
+        self.assertEqual([g['name'] for g in e.groups()], ['g'])
+
+    def test_mask_and_scrollbar(self):
+        """M-07: compare off with mask keeps the mask; layout scrollbar, in the state's config; view_get's summary says both off."""
+        import wavemcp
+        e = ed()
+        self.assertEqual(e.run([{'op': 'compare', 'off': True, 'mask': False}])[0], {'op': 'compare', 'off': True})
+        self.assertIs(e.st['config']['compareMask'], False)
+        self.assertIn('error', e.run([{'op': 'compare', 'off': True, 'mask': 'no'}])[0])
+        r = e.run([{'op': 'layout', 'scrollbar': False}, {'op': 'layout', 'scrollbar': 'x'}])
+        self.assertEqual((r[0]['scrollbar'], 'error' in r[1], e.st['config']['scrollbar']), (False, True, False))
+        s = wavemcp.summary(e.st, True, e)
+        self.assertEqual((s.get('compareMask'), s.get('scrollbar')), (False, False))
+        self.assertEqual(e.run([{'op': 'layout', 'scrollbar': None}])[0]['scrollbar'], True)
+
+    def test_from_page_takes_the_order(self):
+        """M-04: --from-page takes your order of the page (edit.js KEPT has it) and the scroll bar setting."""
+        apb = os.path.join(os.environ.get('BUILD', os.path.join(H.ROOT, 'out')), 'examples', 'apb', 'apb.html')
+        if not os.path.isfile(apb):
+            self.skipTest('make examples')
+        with H.tmp() as d:
+            page = os.path.join(d, 'apb.html')
+            shutil.copy(apb, page)
+            key = 'transfers'
+            res = V.edit_page(page, [{'op': 'set_state', 'state': {'wavelens': 'state', 'order': {'apb_tb': ['PSEL', 'PCLK']}}},
+                                     {'op': 'layout', 'scrollbar': False}], key)
+            self.assertFalse([r for r in res[0] if 'error' in r], res)
+            work = {}
+            r = V.page_into(work, page, key)
+            self.assertIn('order', r['taken'])
+            self.assertEqual((work['state']['order'], work['state']['config']['scrollbar']), ({'apb_tb': ['PSEL', 'PCLK']}, False))

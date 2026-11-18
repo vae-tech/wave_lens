@@ -418,6 +418,67 @@ fn merged_attempts_give_the_same_results() {
     assert!(merged_traces_differ < 40, "{merged_traces_differ} traces differ");
 }
 
+/// The list cut as the CLI cut it before 2026-11-18 (after the whole evaluation): the failures first, then the others,
+/// the first by start of each; and what `listed` says of all of them.
+fn cut_after(o: &Outcome, n: usize) -> (Vec<Attempt>, usize, Option<Attempt>, Option<Attempt>) {
+    let fails: Vec<&Attempt> = o.attempts.iter().filter(|x| x.result == Status::Fail).collect();
+    let key = |x: &&&Attempt| (x.failed_at.unwrap_or(x.end), x.start);
+    let (first, last) = (fails.iter().min_by_key(key).map(|x| (*x).clone()), fails.iter().max_by_key(key).map(|x| (*x).clone()));
+    let mut left = (fails.len().min(n), n - fails.len().min(n));
+    let kept = o.attempts.iter().filter(|x| {
+        let k = if x.result == Status::Fail { &mut left.0 } else { &mut left.1 };
+        *k > 0 && {
+            *k -= 1;
+            true
+        }
+    }).cloned().collect();
+    (kept, o.attempts.len(), first, last)
+}
+
+#[test]
+fn a_capped_list_is_the_whole_list_cut() {
+    // max_listed keeps the failures first and the others, the first by start of each, without holding the ones past
+    // the cap (review 2026-11-18 B-05): the same list, counts, lane and `listed` as the whole list cut afterwards — also
+    // where attempts end out of their start order (a long one that fails after a short one started later)
+    let props = ["a |-> ##[1:3] b", "a |=> b[*1:$] ##1 c", "a |-> s_eventually b", "a |-> b[->2] ##1 c", "1 |-> a", "a ##[0:2] b |-> c"];
+    let mut seed = 0x9e3779b97f4a7c15u64;
+    let mut bits = |n: usize, p: u64| {
+        (0..n).map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            if seed % 100 < p { '1' } else { '0' }
+        }).collect::<String>()
+    };
+    let mut cut_seen = 0;
+    for prop in props {
+        for round in 0..4 {
+            let sigs = format!("a={} b={} c={}", bits(60, 20 + 15 * round), bits(60, 25), bits(60, 40));
+            for passes in [true, false] {
+                let all = outcome(prop, &sigs, &Options { passes, ..Options::default() });
+                for n in [0, 1, 2, 3, 7, 1000] {
+                    let o = outcome(prop, &sigs, &Options { passes, max_listed: Some(n), ..Options::default() });
+                    let (kept, total, first, last) = cut_after(&all, n);
+                    let at = format!("{prop} over {sigs}, passes {passes}, max_listed {n}");
+                    assert_eq!(o.attempts, kept, "{at}");
+                    assert_eq!((&o.stats, &o.lane), (&all.stats, &all.lane), "{at}");
+                    if total > n {
+                        cut_seen += 1;
+                        let l = o.listed.as_ref().unwrap();
+                        assert_eq!((l.of, l.passes), (Some(total), passes), "{at}");
+                        assert_eq!((&l.first_fail, &l.last_fail), (&first, &last), "{at}");
+                        assert_eq!(o.first_fail(), first.as_ref(), "{at}");
+                        assert!(o.notes.last().unwrap().contains(&format!("the first {n} of {total} attempts listed")), "{at}");
+                    } else {
+                        assert_eq!(o.listed, all.listed, "{at}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(cut_seen > 50, "{cut_seen} cut lists");
+}
+
 #[test]
 fn a_long_attempt_keeps_its_first_and_last_steps() {
     let n = 300;

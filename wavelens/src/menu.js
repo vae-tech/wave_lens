@@ -244,6 +244,7 @@ Object.assign(WaveView.prototype, {
       (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
       (gk === 'divider' ? '' : b('hide', many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? `Hide this ${gk}` : 'Hide')) +
       b('copyname', many ? `Copy the ${sigs.length} paths` : 'Copy the path') +
+      (sig && !many && this.sva && this.sva.qAll().length ? b('svasig', 'Assertions on this signal', 'The Assertions panel\'s search: @ its full path') : '') +
       // your groups: its place there (or a group's among yours), into / out of a group, a new one, delete; go to any of them
       menuSub('subg', 'Your groups',
         (own && mvAt2[1] > 1 ? `<div class="mh">its place in ${esc(ownIn)} (alt+↑ ↓)</div>` + mvs(ownIn) : '') +   // the dump's rows: your order
@@ -382,6 +383,7 @@ Object.assign(WaveView.prototype, {
           this.changed(true); }, '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
+      else if (act === 'svasig') { this.closeMenu(); this.sva.onSignal((sig0.of || sig0).full); return this; }   // (a bit: its bus)
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
       else if (act === 'copylink') {   // the place clicked (on a signal: snapped as Bookmark here), M-08
         const t = at == null ? this.cursor : sig ? this.snap(sig, at) : at;

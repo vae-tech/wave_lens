@@ -228,13 +228,18 @@ listed with their traces, default 100; all are counted), `from` / `to` (attempts
 evaluation ends at `to`; `sva eval --from 2us --to 5us` maps times to cycles), `merge` (default true: attempts in the
 same state are stepped once; false steps each one, for tests), `passes` (default true: the passing attempts of an assert
 or assume listed; false counts them only, the failures and the attempts without verdict listed: `sva eval --no-pass`, a
-large dump's millions of passes).
+large dump's millions of passes), `max_listed` (default none: every attempt listed; N lists at most N of each assertion,
+the failures first, then the others, the first by start of each: `sva eval --max-attempts N`; the ones past it are
+counted and marked on the lane, never held with their traces).
 
 `sva eval` for a large dump (the page in VS Code evaluates so when a signal is too busy to read whole): `--no-pass`
-(`passes` false: the passes and the vacuous attempts are counted and marked on the lane, no record of them kept), `--max-attempts N` (the first N
-attempts of each assertion listed, the failures first; a note says how many there were) — a list so made carries
-`listed`: `{passes, of, longest: [cycles, start], last_fail}`, the facts of all the attempts it lacks (the report takes
-its Last failure and Longest from there, no latency without the passes) — and
+(`passes` false: the passes and the vacuous attempts are counted and marked on the lane, no record of them kept), `--max-attempts N`
+(`max_listed`: N attempts of each assertion listed, the failures first — the first N failures by start, then the other
+attempts by start up to N; a note says how many there were; the cap is applied while the dump is evaluated, so an
+assertion failing on every cycle of 5 M holds 20 000 traces, not 5 M: 4.8 s and 550 MB) — a list so made carries
+`listed`: `{passes, of, longest: [cycles, start], first_fail, last_fail}`, the facts of all the attempts it lacks (the
+report takes its First failure, Last failure and Longest from there, no latency without the passes or of a cut list,
+"Failures (N of M listed)"; `sva diff --results` compares a cut list up to its last listed start) — and
 `--cycle-runs` (the JSON's `cycles`, the document's and an assertion's on another clock, written as `cycle_runs`:
 `[[first, step, count], ...]`, one run while the clock's period holds, not one number per cycle: a 5 M-cycle dump's
 results 2 MB instead of 180).
@@ -299,6 +304,9 @@ the CLI's output to it.
   by their start cycle's time: a start with a failure in both runs is the same failure (moved when `failed_at` differs), a start
   in one run only is new or gone; as many new as gone at other starts pair by their order and are moved. A cover compares
   `stats.matches` (else `pass`): matched in A and never in B is lost (exit 1), never in A and matched in B found.
+  A cut list (`listed.of`, fewer failures listed than `stats.fail`) holds the first failures by start: the assertion
+  compares the starts up to the last one it lists (the shorter list's of the two), `compared_to` in the JSON, `partial`
+  counts such assertions; `a.fails` / `b.fails` are `stats.fail`, a cut side's `listed` what it lists.
 - `missing` (signals not in the trace: not evaluated) and `notes` (a thread limit was reached, a short column, values
   cut to 64 bits) appear when not empty.
 

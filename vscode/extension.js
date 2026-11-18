@@ -185,6 +185,18 @@ function lazyFor(file, size) {
   return set === 'always' || (set !== 'never' && size >= (/\.fst$/i.test(file) ? LAZY_FST : LAZY_VCD));
 }
 const stamp = st => `${st.size}:${st.mtimeMs}`;   // a file's size and time: the same file, or written since
+// the setting wavelens.runsDir as a directory (review 2026-11-18 V-07): ~ and ${userHome} your home, ${workspaceFolder} the dump's
+// workspace folder (none: the dump's directory, base), a relative path under base; a Windows path (C:\runs) on a host of
+// another system is no absolute path there: said once in the log, taken as relative
+const DRIVE_SAID = new Set();
+function runsPath(set, base) {
+  const home = os.homedir();
+  const s = String(set).replace(/^~(?=$|[\\/])/, home).replace(/\$\{userHome\}/g, home).replace(/\$\{workspaceFolder\}/g, base);
+  if (process.platform !== 'win32' && /^[A-Za-z]:[\\/]/.test(s) && !DRIVE_SAID.has(s)) {
+    DRIVE_SAID.add(s); log(`wavelens.runsDir ${set} is a Windows path: this host (${process.platform}) takes it as relative to ${base}`);
+  }
+  return path.isAbsolute(s) ? s : path.join(base, s);
+}
 const vcdOf = file => (/\.fst$/i.test(file) ? convert(file, 'vcd', 'VCD text', (bin, tmp) => ['vcd', file, '--out', tmp]) : Promise.resolve(file));
 const fstOf = file => (/\.fst$/i.test(file) ? Promise.resolve(file) :
   convert(file, 'fst', 'FST', (bin, tmp) => ['fst', file, '--no-types', '--quiet', '--out', tmp]));
@@ -446,26 +458,32 @@ ${scripts}
   async codes(list, win, rid) {
     const bin = svaBin(), fst = this.fst;
     if (!fst) return { error: 'this dump is read whole' };
-    const now = await fs.promises.stat(fst).then(stamp, () => 'gone');
-    if (now !== this.fstAt) return { error: `${path.basename(this.file)} changed on the disk since it was read: ⟳ (R) reads it again` };
-    const args = ['vcd', fst, '--codes', '-'];
-    for (const [k, flag] of [['from', '--from'], ['to', '--to'], ['lod', '--lod'], ['keep', '--keep']]) {
-      const v = win && win[k];
-      if (v == null) continue;
-      if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > 2 ** 53 || Math.floor(v) !== v) return { error: `codes: ${k} ${v} is no time or count` };
-      args.push(flag, String(v));
-    }
-    const job = { rid, stopped: false, p: null };
+    // registered before the first await: a codes-stop that comes meanwhile finds it, and it never starts (review 2026-11-18 V-05)
+    const job = { rid, stopped: false, p: null, started: false };
     if (rid != null) this.reads.set(rid, job);
-    const r = await new Promise(ok => {
-      job.ok = ok;
-      job.go = () => spawnRun(bin, args, { input: list.map(String).join('\n'), maxOut: CODES_MAX, timeout: CODES_TIMEOUT,
-        keep: p => { job.p = p; return this.proc(p); } }).then(ok);
-      this.codesQ.push(job);
-      this.codesNext();
-    });
-    if (job.p) { this.codesN--; this.codesNext(); }
-    if (rid != null) this.reads.delete(rid);
+    const r = await (async () => {
+      const now = await fs.promises.stat(fst).then(stamp, () => 'gone');
+      if (job.stopped) return { stopped: true };
+      if (now !== this.fstAt) return { error: `${path.basename(this.file)} changed on the disk since it was read: ⟳ (R) reads it again` };
+      const args = ['vcd', fst, '--codes', '-'];
+      for (const [k, flag] of [['from', '--from'], ['to', '--to'], ['lod', '--lod'], ['keep', '--keep']]) {
+        const v = win && win[k];
+        if (v == null) continue;
+        if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > 2 ** 53 || Math.floor(v) !== v) return { error: `codes: ${k} ${v} is no time or count` };
+        args.push(flag, String(v));
+      }
+      return new Promise(ok => {
+        job.ok = ok;
+        // started: its slot given back even when the spawn threw at once (no child kept; review 2026-11-18 V-02)
+        job.go = () => { job.started = true; spawnRun(bin, args, { input: list.map(String).join('\n'), maxOut: CODES_MAX, timeout: CODES_TIMEOUT,
+          keep: p => { job.p = p; return this.proc(p); } }).then(ok); };
+        this.codesQ.push(job);
+        this.codesNext();
+      });
+    })();
+    if (job.started) { this.codesN--; this.codesNext(); }
+    if (rid != null && this.reads.get(rid) === job) this.reads.delete(rid);
+    if (r.error && !job.started) return { error: r.error };
     if (job.stopped || r.stopped) return { error: 'stopped' };
     if (r.big) return { error: `more than ${mb(CODES_MAX)} of changes at once: fewer signals, or a shorter window` };
     if (r.code === 0) return { text: r.out };
@@ -482,7 +500,14 @@ ${scripts}
   async svaEval(m) {
     const bin = svaBin(), fst = this.fst;
     if (!fst) return { error: 'this dump is read whole' };
+    // registered before the first await (V-05); an evaluation, in its slot (codesNext: the reads go first, V-06)
+    const job = { rid: m.rid, stopped: false, p: null, started: false, eval: true };
+    if (m.rid != null) this.reads.set(m.rid, job);
+    try { return await this.svaEvalJob(m, bin, fst, job); } finally { if (m.rid != null && this.reads.get(m.rid) === job) this.reads.delete(m.rid); }
+  }
+  async svaEvalJob(m, bin, fst, job) {
     const now = await fs.promises.stat(fst).then(stamp, () => 'gone');
+    if (job.stopped) return { error: 'stopped' };
     if (now !== this.fstAt) return { error: `${path.basename(this.file)} changed on the disk since it was read: ⟳ (R) reads it again` };
     const files = (Array.isArray(m.files) ? m.files : []).filter(f => f && typeof f.name === 'string' && typeof f.source === 'string');
     if (!files.length) return { error: 'no SystemVerilog file to evaluate' };
@@ -498,7 +523,6 @@ ${scripts}
     if (m.max != null) args.push('--max-attempts', String(m.max));
     if (m.from != null) args.push('--from', `${m.from}ps`);
     if (m.to != null) args.push('--to', `${m.to}ps`);
-    const job = { rid: m.rid, stopped: false, p: null };
     try {
       for (const [i, f] of files.entries()) {
         const p = path.join(dir, String(i), path.basename(f.name.replace(/\\/g, '/')) || 'assertions.sv');
@@ -506,12 +530,13 @@ ${scripts}
         await fs.promises.writeFile(p, f.source);
         args.push('--sva', p);
       }
-      if (m.rid != null) this.reads.set(m.rid, job);
-      // in turn with the reads of signals: at most CODES_PROCS CLIs of a tab at once (an evaluation of a large dump: 0.5 GB)
+      if (job.stopped) return { error: 'stopped' };
+      // in turn with the reads of signals: at most CODES_PROCS CLIs of a tab at once (an evaluation of a large dump: 0.5 GB),
+      // the evaluations in one slot fewer (codesNext)
       const r = await new Promise(ok => { job.ok = ok;
-        job.go = () => spawnRun(bin, args, { timeout: SVA_TIMEOUT, keep: p => { job.p = p; return this.proc(p); } }).then(ok);
+        job.go = () => { job.started = true; spawnRun(bin, args, { timeout: SVA_TIMEOUT, keep: p => { job.p = p; return this.proc(p); } }).then(ok); };
         this.codesQ.push(job); this.codesNext(); });
-      if (job.p) { this.codesN--; this.codesNext(); }
+      if (job.started) { this.codesN--; this.evalN--; this.codesNext(); }
       if (job.stopped || r.stopped) return { error: 'stopped' };
       if (r.code === 0 || r.code === 1) return { text: await fs.promises.readFile(out, 'utf8') };
       // 2 with its results written (a window with no clock edge, one assertion of several on a signal the dump lacks): those
@@ -526,13 +551,20 @@ ${scripts}
       }
       return { error: r.err.split('\n').filter(l => !/^sva: \d+ assertions over/.test(l)).join('; ') || `${bin} eval: exit ${r.code}` };
     } finally {
-      if (m.rid != null) this.reads.delete(m.rid);
       fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
   }
+  // the next CLIs of the queue, CODES_PROCS at once: a read of the waves before an evaluation that waits, and the evaluations
+  // in CODES_PROCS - 1 slots, so a whole-dump evaluation never holds back every read of the waves (review 2026-11-18 V-06)
   codesNext() {
     if (this.disposed) return;
-    while (this.codesN < CODES_PROCS && this.codesQ.length) { this.codesN++; this.codesQ.shift().go(); }
+    while (this.codesN < CODES_PROCS && this.codesQ.length) {
+      let i = this.codesQ.findIndex(j => !j.eval);
+      if (i < 0) { if ((this.evalN || 0) >= Math.max(1, CODES_PROCS - 1)) return; i = 0; }
+      const job = this.codesQ.splice(i, 1)[0];
+      this.codesN++; if (job.eval) this.evalN = (this.evalN || 0) + 1;
+      job.go();
+    }
   }
   // a read the page no longer wants: out of the queue, or its CLI killed; answered 'stopped'
   codesStop(rid) {
@@ -700,17 +732,28 @@ ${scripts}
   // before (the page compares it again with a new A)
   // pick: the dialog only -> {path, name} (Compare… picks B; the page's Compare then compares it over the window in sight)
   async compare(signals, from, to, path0, of, pick = false) {
-    const rec = await this.recordOf(of), a = rec && rec.file;
+    const pickB = async () => {   // the dialog: before A is looked for (a pick needs none; review 2026-11-18 V-07)
+      const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
+        title: `Compare ${this.shown ? this.shown.name : path.basename(this.file)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
+      return got && got.length ? got[0].fsPath : null;
+    };
+    let b = path0;
+    if (!b && pick) { b = await pickB(); return b ? { path: b, name: path.basename(b) } : {}; }
+    const rec = await this.recordOf(of);
+    let a = rec && rec.file;
     if (!a) return { error: `compare: no run #${of}` };
     // a slice as A is read at its place in the file (a whole one, from 0): B's time is A's plus the slice's start (runs.rs prep)
     const sl = rec.run && rec.run.slice, off = sl ? Math.round(+sl.from || 0) : 0;
-    let b = path0;
-    if (!b) {
-      const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
-        title: `Compare ${path.basename(a)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
-      if (!got || !got.length) return {};
-      b = got[0].fsPath;
-      if (pick) return { path: b, name: path.basename(b) };
+    if (!b) { b = await pickB(); if (!b) return {}; }
+    // a large VCD read lazy has its FST made already (the tab reads it): that is A, read by the window, not the text scanned up to
+    // it; a large VCD as B made an FST once too (kept, as the tab's are) — review 2026-11-18 V-04
+    if (!rec.run && !this.shown && this.fst && this.fstAt && a === this.file && /\.vcd$/i.test(a)) {
+      const now = await fs.promises.stat(this.fst).then(stamp, () => 'gone');
+      if (now === this.fstAt) a = this.fst;
+    }
+    if (/\.vcd$/i.test(b)) {
+      const size = await fs.promises.stat(b).then(st => st.size, () => 0);
+      if (size >= LAZY_VCD) b = await fstOf(b).catch(e => { log(`${path.basename(b)}: compared as VCD text (${e.message})`); return b; });
     }
     const bin = svaBin();
     // sva diff --page: the compare as the tab takes it, the run's values of the signals that differ in it (at most 32 MiB:
@@ -720,13 +763,14 @@ ${scripts}
     if (isFinite(to)) args.push('--to', `${Math.round(to)}ps`);
     if (off) args.push('--offset', `${off}ps`);
     log(`${path.basename(this.file)}: compare ${path.basename(a)} with ${b}${off ? ` (B +${off / 1000} ns: a slice at its place)` : ''}`);
-    const x = await spawnRun(bin, args, { input: signals.join('\n') + '\n', keep: p => this.proc(p) });
+    // one at a time, as the runs' compares: a newer Compare (each pan) or runs cancel (✕, no B) stops the one before (V-03)
+    const own = this.ownRun(), x = await spawnRun(bin, args, { input: signals.join('\n') + '\n', keep: p => this.proc(own(p)) });
     const r = x.code === 0 || x.code === 1 ? { text: x.out } : { error: x.sig ? 'stopped' : x.err || `${bin} diff: exit ${x.code}` };
     if (r.error) { log(`${path.basename(this.file)}: compare: ${r.error}`); return { error: `compare: ${r.error}` }; }
     let d;
     try { d = cliJson(r.text); } catch (e) { return { error: `compare: sva diff wrote no JSON (${e.message})` }; }
     if (d.cutError) log(`${path.basename(this.file)}: the values of ${path.basename(b)} are not in the tab: ${d.cutError}`);
-    d.src = { path: b };   // what the page compares again when A moves
+    d.src = { path: path0 || b };   // what the page compares again when A moves (the file picked, not an FST made of it)
     return { result: d };
   }
   // the file of the waves the page names (of: a run kept, its FST; 0, none: the dump) -> its path, or null (no such run).
@@ -739,6 +783,8 @@ ${scripts}
   async recordOf(of) {
     const id = parseInt(of, 10);
     if (!(id > 0)) return { file: this.file, run: null };
+    // the run shown (A): its own file, whichever directory the runs are in now (it moved under the tab: review 2026-11-18 V-01)
+    if (this.shown && this.shown.id === id && this.shown.file) return { file: this.shown.file, run: this.shown.run || null };
     const dir = this.runsDir(), r = await this.sva(['runs', 'list', '--dir', dir, '--json']);
     let l = null; try { l = cliJson(r.out); } catch (e) { /* none */ }
     const run = l && (l.runs || []).find(x => x.id === id);
@@ -755,17 +801,26 @@ ${scripts}
   // name compared, wherever it is in the run (B offset to it, the shorter length). dir {keep} -> {dir, dirOf}: the panel's ★ —
   // the directory of now written to the setting wavelens.runsDir (the workspace's settings when the dump is in a workspace
   // folder: relative to it when inside; else the user's, absolute), keep false: the setting in effect cleared
+  // the settings of this dump's place: a workspace folder's own value of wavelens.runsDir too (several folders)
+  runsCfg() { return vscode.workspace.getConfiguration('wavelens', vscode.Uri.file(this.file)); }
   runsDir() {
-    const set = vscode.workspace.getConfiguration('wavelens').get('runsDir');
+    const set = String(this.runsCfg().get('runsDir') || '');
     if (!set) return path.join(path.dirname(this.file), '.wavelens-runs');
     const ws = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.file));
-    return path.isAbsolute(set) ? set : path.join(ws ? ws.uri.fsPath : path.dirname(this.file), set);
+    return runsPath(set, ws ? ws.uri.fsPath : path.dirname(this.file));
   }
-  // where the runs' directory comes from: the setting wavelens.runsDir (set: its text; scope: the settings that have it,
-  // workspace or user), or none (set '': .wavelens-runs beside the dump)
+  // where the runs' directory comes from: the setting wavelens.runsDir (set: its text; scope: the settings that have it in
+  // effect — folder, a workspace folder's; workspace; user), or none (set '': .wavelens-runs beside the dump)
   runsDirOf() {
-    const c = vscode.workspace.getConfiguration('wavelens'), set = String(c.get('runsDir') || ''), i = (c.inspect && c.inspect('runsDir')) || {};
-    return { set, scope: !set ? '' : i.workspaceFolderValue !== undefined || i.workspaceValue !== undefined ? 'workspace' : 'user' };
+    const c = this.runsCfg(), set = String(c.get('runsDir') || ''), i = (c.inspect && c.inspect('runsDir')) || {};
+    return { set, scope: !set ? '' : i.workspaceFolderValue !== undefined ? 'folder' : i.workspaceValue !== undefined ? 'workspace' : 'user' };
+  }
+  // a compare (or Δ all) asked while another runs: the older one's processes killed, its answer "stopped" — the runs' compares
+  // and a file's Compare alike; runs cancel stops it (✕, no B)
+  ownRun() {
+    if (this.runsBusy) this.runsBusy.forEach(p => p.kill());
+    const set = this.runsBusy = new Set();
+    return p => { set.add(p); p.on('close', () => set.delete(p)); return p; };
   }
   // a window [from, to] of a dump as an FST of its own at out, its times from 0 (the runs' cut)
   cutOf(src, [from, to], out) { return this.sva(['fst', src, '--from', from, '--to', to, '--zero', '--out', out, '--quiet']); }
@@ -782,9 +837,18 @@ ${scripts}
     // A: the run asked (against), else the one shown
     const against = () => (m.against != null ? nowOr(m.against) : 'now');   // the page sends its A (a shell's ask: the dump)
     this.watchRuns(dir);
-    // a compare (or Δ all) asked while another runs: the older one's processes killed, its answer "stopped"
-    const own = () => { if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); const set = this.runsBusy = new Set();
-      return p => { set.add(p); p.on('close', () => set.delete(p)); return p; }; };
+    const own = () => this.ownRun();
+    // the runs' numbers the page sends are of the directory it listed (dir): another now (a ★ in another tab, the setting
+    // edited) — refused, the list read again, never another run of the same number (review 2026-11-18 V-01)
+    if (['open', 'set', 'rm', 'diff', 'compare'].includes(m.op) && typeof m.dir === 'string' && m.dir && path.resolve(m.dir) !== path.resolve(dir)) {
+      this.post({ type: 'runs-changed' });
+      return { error: `the runs' directory moved (${m.dir} → ${dir}): the list read again` };
+    }
+    // A a run shown of the directory of before: its number is another run's here
+    const aGone = () => !!this.shown && against() === String(this.shown.id) && !!this.shown.dir && path.resolve(this.shown.dir) !== path.resolve(dir);
+    if ((m.op === 'diff' || m.op === 'compare') && aGone()) {
+      return { error: `A ${this.shown.name} is a run of ${this.shown.dir}; the runs' directory is now ${dir}: ]w to now, or show a run of it` };
+    }
     switch (m.op) {
       case 'list': {   // this dump's runs (by its file name), the ones of other dumps counted
         const r = await this.sva(['runs', 'list', this.file, '--dir', dir, '--json']), d = json(r);
@@ -794,15 +858,17 @@ ${scripts}
           : fail(r, 'list');
       }
       case 'dir': {   // ★: this directory for every dump (the setting written), or the setting in effect cleared
-        const c = vscode.workspace.getConfiguration('wavelens'), T = vscode.ConfigurationTarget;
+        const c = this.runsCfg(), T = vscode.ConfigurationTarget;
         const ws = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.file)), i = (c.inspect && c.inspect('runsDir')) || {};
+        // a workspace folder's own value is the one in effect: written and cleared there (else a lit ★ no click clears; V-07)
+        const folder = i.workspaceFolderValue !== undefined;
         try {
           if (m.keep) {   // inside the workspace folder: relative to it (the folder moved or cloned: still its runs; sva runs reads it so);
             // several folders (a .code-workspace): a relative one would be each folder's own, so the path whole
             const rel = ws ? path.relative(ws.uri.fsPath, dir) : '', wf = vscode.workspace.workspaceFolders, one = !(Array.isArray(wf) && wf.length > 1);
-            const inside = one && !!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
-            await c.update('runsDir', inside ? rel.split(path.sep).join('/') : dir, ws ? T.Workspace : T.Global);
-          } else await c.update('runsDir', undefined, i.workspaceValue !== undefined ? T.Workspace : T.Global);
+            const inside = (one || folder) && !!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+            await c.update('runsDir', inside ? rel.split(path.sep).join('/') : dir, folder ? T.WorkspaceFolder : ws ? T.Workspace : T.Global);
+          } else await c.update('runsDir', undefined, folder ? T.WorkspaceFolder : i.workspaceValue !== undefined ? T.Workspace : T.Global);
         } catch (e) { return { error: `the setting wavelens.runsDir is not written: ${e.message}` }; }
         const now = this.runsDir(), of = this.runsDirOf();
         log(`${name}: wavelens.runsDir ${of.set ? `= ${of.set} (the ${of.scope}'s settings)` : 'cleared'}: the runs in ${now}`);
@@ -815,7 +881,7 @@ ${scripts}
         if (!run) return { error: `no run #${id} in ${dir}` };
         const file = path.join(dir, run.file), nm = `#${run.id} ${run.name}`;
         let o; try { o = await this.srcOf(file, nm); } catch (e) { return { error: `${nm}: ${e.message}` }; }
-        this.shown = { id: run.id, file, name: nm };
+        this.shown = { id: run.id, file, name: nm, run, dir };   // its file and directory: A stays this file if the directory moves
         log(`${name}: ${nm} (${run.file}) shown in the tab`);
         return o;
       }

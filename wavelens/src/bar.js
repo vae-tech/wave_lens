@@ -198,13 +198,15 @@ const HELP = [
   ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
     [['c'], 'zoom in on the cursor'],
     [['ctrl+wheel', 'pinch'], 'zoom at the pointer'], [['wheel'], 'scroll the rows'], [['shift+wheel', 'drag', '←', '→'], 'pan'],
-      [['shift+drag', 'middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows']]],
+      [['shift+drag', 'middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows'],
+    [['the bar under the waves'], 'zoomed in: all of the waves, the window its thumb: drag it, click its track (held: the window\'s ends)']]],
   ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'],
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
     [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there, ✎ or F2 renames'],
     [['gv'], 'the waves with the gaps cut out, or in continuous time'],
-    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group or its module (shift: the group, the module); or drag it in your group'],
+    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group or its module (shift: the group, the module; a sort drops your order of the module: '
+      + 'that sort again brings it back); or drag it in your group'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
@@ -214,16 +216,17 @@ const HELP = [
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
     [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'],
-    [['*', '#'], 'find the selected name: its next / previous match']]],
+    [['*', '#'], 'find the selected name: its next / previous match'],
+    [['/ in the assertions panel'], 'find assertions: name* @signal in:scope is:fail (Mask: only them on the waves; Esc empties it)']]],
   ['Measure and mark', [[['shift+click'], 'a second cursor: Δ to the cursor, in cycles of the clock'], [['x'], 'swap the cursors'],
     [['c147'], 'in the cursor field: cycle 147 of the clock (right button: Cycles ▸, a band of them under the axis)'],
-    [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
+    [[']d', '[d'], 'next / previous difference from a dump compared (File ▾ → Compare with…, then Compare)'],
     [['d'], 'a dump compared: flip the waves between the two runs (the time axis names the one shown)'],
     [['D'], 'a dump compared: both runs over each other where they differ, again one'],
     [['gb'], 'a dump compared: the red mask over the differences on or off (off: d blinks between the runs)'],
     [['g='], 'compare A and B (Compare… a file, the Runs panel\'s) over the window in sight; zoomed since: again'],
     [['gu'], 'the runs kept of this dump (VS Code): keep this one, show one (A), compare one with it (B) over the waves in sight or a span'],
-    [[']r', '[r'], 'B: compare A with the next (older) / previous run kept, over the same window'],
+    [[']r', '[r'], 'B: pick the next (older) / previous run kept (g= compares it with A over the window in sight)'],
     [[']w', '[w'], 'A: the waves of the next (older) / previous run kept shown here, the view kept (now among them)'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'],
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
@@ -270,9 +273,12 @@ const KEY_MENUS = {
     ['a', 'open or fold it'], ['z', 'zoom to the range', v => !!v.range || v.cursor2 != null]]],
   y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)'],
     ['i', 'an image of the range (else the window)'], ['I', 'an image of all rows']]],
-  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
+  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp],
+    ['r', 'run kept (picked as B; g= compares)', v => v.runsHost()],
     ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
-  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
+  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp],
+    ['r', 'run kept (picked as B; g= compares)', v => v.runsHost()],
+
     ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
 };
 
@@ -459,7 +465,7 @@ class Bar {
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas>` +
         `<div class="hsb" hidden title="All of the waves: drag the window, click to bring it there (held: its ends)">` +
-        '<div class="hsbt"></div>' +
+        '<div class="hsbt"></div><div class="hsbk"></div>' +
         `<span class="hsbtip" hidden></span></div></div></div>
       <div class="notes" hidden></div>
       <div class="wlog" hidden></div>

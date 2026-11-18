@@ -175,6 +175,14 @@ fn evaluates_over_a_vcd() {
     assert_eq!(sva(&["eval", "--waves", &vcd]).status.code(), Some(2));
     assert_eq!(sva(&["eval", "--waves", &vcd, "--sva", &up, "--from", "3 parsecs"]).status.code(), Some(2));
     assert!(out(&sva(&["eval", "--help"])).contains("usage: sva parse"));
+    // what the help says of the code's options (review 2026-11-18 D-12, D-13, D-17)
+    let top = out(&sva(&["--help"]));
+    for x in ["--max-attempts N lists N attempts of each assertion, the failures first", "sva fst DUMP --from T --to T [--zero]", "[--cases FILE|-|none] [--from T --to T] [--dir D]"] {
+        assert!(top.contains(x), "sva --help without {x:?}");
+    }
+    assert!(out(&sva(&["fst", "--help"])).contains("--large-bytes N"));
+    assert!(out(&sva(&["diff", "--help"])).contains("--large-bytes N"));
+    assert!(out(&sva(&["runs", "--help"])).contains("--tag is --tags"));
 }
 
 #[test]
@@ -377,6 +385,54 @@ fn a_large_dump_failures_alone_and_cycle_runs() {
     let o = sva(&["diff", "--results", &pa, &pb, "--json", "-"]);
     let dj: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}{}", out(&o), err(&o)));
     assert_eq!((dj["moved"].as_u64(), dj["new"].as_u64(), dj["gone"].as_u64()), (Some(0), Some(0), Some(0)), "{dj}");
+    // a cut list against the whole one: compared up to the cut list's last listed start, said on a line; nothing new or
+    // gone past it, either way round (review 2026-11-18 B-06)
+    let pc = write("res-cut.json", &serde_json::to_string(&cut).unwrap());
+    let third = fails(a)[2]["start"].as_u64().unwrap() as usize;
+    let t3 = all["cycles"][third].as_u64().unwrap();
+    for (x, y, side) in [(&pa, &pc, "B"), (&pc, &pa, "A")] {
+        let o = sva(&["diff", "--results", x, y]);
+        assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+        assert!(out(&o).contains("0 new, 0 gone, 0 moved") && out(&o).contains(&format!("{side} lists 3 of {} failures", fails(a).len())), "{}", out(&o));
+        let dj: serde_json::Value = serde_json::from_slice(&sva(&["diff", "--results", x, y, "--json", "-"]).stdout).unwrap();
+        assert_eq!((dj["partial"].as_u64(), dj["assertions"][0]["compared_to"].as_u64()), (Some(1), Some(t3)), "{dj}");
+    }
+    // a change before the cut is still found
+    let mut moved = cut.clone();
+    moved["assertions"][0]["attempts"][0]["failed_at"] = serde_json::json!(fails(a)[0]["start"].as_u64().unwrap() + 1);
+    let pm = write("res-moved.json", &serde_json::to_string(&moved).unwrap());
+    let o = sva(&["diff", "--results", &pa, &pm]);
+    assert_eq!(o.status.code(), Some(1), "{}", out(&o));
+    assert!(out(&o).contains("0 new, 0 gone, 1 moved"), "{}", out(&o));
+    // the report of a cut list: no latency of the listed passes, the failures said "N of M listed", the first failure the
+    // whole run's even with none listed (review 2026-11-18 B-10)
+    let report = |doc: &serde_json::Value, name: &str, f: &str| {
+        let p = write(name, &serde_json::to_string(doc).unwrap());
+        let o = sva(&["report", f, "-", &p]);
+        assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+        out(&o)
+    };
+    let whole = report(&all, "rep-all.json", "--md");
+    let row = |md: &str| md.lines().find(|l| l.starts_with("| `a_req`")).unwrap_or_default().to_string();
+    let cells = |md: &str| row(md).split(" | ").map(String::from).collect::<Vec<_>>();
+    assert!(!cells(&whole)[cells(&whole).len() - 1].starts_with('—'), "{whole}");
+    let nf = fails(a).len();
+    // (25: every failure and 4 passes listed: their latency is not the run's)
+    let docs = [(&mixed, "rep-mixed.json", 3), (&json(&["--max-attempts", "0"]), "rep-zero.json", 0), (&json(&["--max-attempts", "25"]), "rep-25.json", nf)];
+    for (doc, name, listed) in docs {
+        let md = report(doc, name, "--md");
+        let (c, w) = (cells(&md), cells(&whole));
+        assert_eq!(c[c.len() - 1].trim_end_matches(" |").trim(), "—", "latency: {md}");
+        assert_eq!((&c[10], &c[11], &c[12]), (&w[10], &w[11], &w[12]), "first, last failure, longest: {md}");
+        if listed == nf {
+            assert!(md.contains(&format!("## Failures ({nf})\n")) && !md.contains("its results list"), "{md}");
+            continue;
+        }
+        assert!(md.contains(&format!("## Failures ({listed} of {nf} listed)")), "{md}");
+        assert!(md.contains(&format!("{} more failures of `a_req` (its results list {listed} of {nf}", nf - listed)), "{md}");
+        let ju = report(doc, &format!("j-{name}"), "--junit");
+        assert!(ju.contains("first at ") && !ju.contains("first at : ") && ju.contains(&format!("(the results list {listed} of {nf})")), "{ju}");
+    }
     let r = json(&["--cycle-runs"]);
     let t: Vec<u64> = all["cycles"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap()).collect();
     assert!(r.get("cycles").is_none());

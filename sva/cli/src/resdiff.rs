@@ -19,7 +19,9 @@ pub const USAGE: &str = "usage: sva diff --results A.json B.json [--map A=B ...]
 The assertions' results of two runs (sva eval --json) compared: an assertion of A pairs with the one of B of its name and
 scope (--map A=B renames A's scopes for B, the longest prefix). Their failed attempts pair by their start: a failure of B
 without one of A at its start is new, one of A without one in B is gone, a pair whose failure is at another cycle moved;
-as many new as gone pair by their order and are moved instead. An assertion only in B: its failures are new; only in A:
+as many new as gone pair by their order and are moved instead. A cut list (sva eval --max-attempts: fewer failures
+listed than stats.fail) holds the first failures by start: its assertion compares up to the last start it lists (the
+shorter list's), said on a line of its own; past it nothing is new or gone. An assertion only in B: its failures are new; only in A:
 gone. A cover compares its matches: matched in A and never in B is lost (exit 1), never in A and matched in B found (exit 0);
 the table shows its matches. One name present twice in a scope pairs by its order. Starts pair by their absolute time:
 a run whose reset or stimulus moved shows its failures as moved, or as new and gone. --json: the result as JSON (times in ps); --junit: a test case per assertion, a failure for new or moved ones (a
@@ -100,6 +102,11 @@ struct Asr {
     fails: Vec<Fail>,
     /// a cover's matches (`stats.matches`, else its passes); None: an assert / assume
     matches: Option<u64>,
+    /// its failures in all (`stats.fail`): more than `fails` when the list was cut (sva eval --max-attempts)
+    total: usize,
+    /// a cut list (fewer failures listed than there were): its failures are the first by start, every one up to the last
+    /// listed start; only starts before this time compare (0: none listed)
+    upto: Option<u64>,
 }
 
 fn read(f: &str) -> Result<Vec<Asr>, String> {
@@ -120,8 +127,11 @@ fn read(f: &str) -> Result<Vec<Asr>, String> {
             .map(|t| Fail { start: at(&t["start"]), at: at(if t["failed_at"].is_null() { &t["end"] } else { &t["failed_at"] }) }).collect();
         fails.sort_by_key(|f| (f.start, f.at));
         let matches = (x["kind"] == "cover").then(|| x["stats"]["matches"].as_u64().or(x["stats"]["pass"].as_u64()).unwrap_or(0));
+        // the list cut (review 2026-11-18 B-06): sva eval --max-attempts lists the failures first, the first by start
+        let total = (x["stats"]["fail"].as_u64().unwrap_or(0) as usize).max(fails.len());
+        let upto = (matches.is_none() && total > fails.len()).then(|| fails.iter().map(|f| f.start + 1).max().unwrap_or(0));
         out.push(Asr { name: x["name"].as_str().unwrap_or("").to_string(), scope: x["scope"].as_str().unwrap_or("").to_string(), stats: x["stats"].clone(),
-            fails: if matches.is_some() { Vec::new() } else { fails }, matches });
+            fails: if matches.is_some() { Vec::new() } else { fails }, matches, total, upto });
     }
     Ok(out)
 }
@@ -180,7 +190,7 @@ fn run(o: &Opt) -> Result<bool, String> {
     let (a, b) = (read(&o.a)?, read(&o.b)?);
     let key = |x: &Asr, scope: &str| format!("{scope}\u{0}{}", x.name);
     let mut rows: Vec<Value> = Vec::new();
-    let (mut n_new, mut n_gone, mut n_moved, mut n_lost, mut n_found) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut n_new, mut n_gone, mut n_moved, mut n_lost, mut n_found, mut n_cut) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
     let lim = |v: Vec<Value>| -> (Vec<Value>, usize) {
         let n = v.len();
         let k = if o.limit == 0 { n } else { o.limit.min(n) };
@@ -191,7 +201,11 @@ fn run(o: &Opt) -> Result<bool, String> {
     let mut one = |x: Option<&Asr>, y: Option<&Asr>, rows: &mut Vec<Value>| {
         let Some(z) = x.or(y) else { return };
         let (name, scope) = (z.name.as_str(), z.scope.as_str());
-        let (fa, fb) = (x.map_or(&[][..], |x| &x.fails[..]), y.map_or(&[][..], |y| &y.fails[..]));
+        // a cut list on either side: the failures compare up to the last start the shorter list holds every one of
+        let upto = x.and_then(|x| x.upto).into_iter().chain(y.and_then(|y| y.upto)).min();
+        let inside = |f: &[Fail]| f.iter().copied().filter(|f| upto.is_none_or(|u| f.start < u)).collect::<Vec<_>>();
+        let (fa, fb) = (inside(x.map_or(&[][..], |x| &x.fails[..])), inside(y.map_or(&[][..], |y| &y.fails[..])));
+        let (fa, fb) = (&fa[..], &fb[..]);
         let (sa, sb) = (x.map_or(Value::Null, |x| x.stats.clone()), y.map_or(Value::Null, |y| y.stats.clone()));
         let (new, gone, moved) = pair(fa, fb);
         n_new += new.len();
@@ -200,8 +214,19 @@ fn run(o: &Opt) -> Result<bool, String> {
         let (nl, nm) = lim(new.iter().map(f).collect());
         let (gl, gm) = lim(gone.iter().map(f).collect());
         let (ml, mm) = lim(moved.iter().map(|(x, y)| json!({"a": f(x), "b": f(y)})).collect());
-        let mut r = json!({"name": name, "scope": scope, "a": {"fails": fa.len(), "stats": sa}, "b": {"fails": fb.len(), "stats": sb},
+        let total = |v: Option<&Asr>| v.map_or(0, |v| v.total);
+        let mut r = json!({"name": name, "scope": scope, "a": {"fails": total(x), "stats": sa}, "b": {"fails": total(y), "stats": sb},
             "new": nl, "gone": gl, "moved": ml, "first_new": new.first().map(|x| x.start)});
+        if let Some(u) = upto {
+            // what was compared: the starts before `upto`; each side's failures listed of all
+            r["compared_to"] = json!(u.checked_sub(1));
+            for (k, v) in [("a", x), ("b", y)] {
+                if let Some(v) = v.filter(|v| v.upto.is_some()) {
+                    r[k]["listed"] = json!(v.fails.len());
+                }
+            }
+            n_cut += 1;
+        }
         if nm + gm + mm > 0 {
             r["more"] = json!({"new": nm, "gone": gm, "moved": mm});
         }
@@ -229,11 +254,11 @@ fn run(o: &Opt) -> Result<bool, String> {
     for (_, y) in b.iter().enumerate().filter(|(j, _)| !seen_b[*j]) {
         one(None, Some(y), &mut rows);
     }
-    let fails = |v: &[Asr]| v.iter().map(|x| x.fails.len()).sum::<usize>();
+    let fails = |v: &[Asr]| v.iter().map(|x| x.total).sum::<usize>();
     let doc = json!({"wavelens": "diff", "kind": "results", "version": 1,
         "a": {"file": o.a, "assertions": a.len(), "fails": fails(&a)}, "b": {"file": o.b, "assertions": b.len(), "fails": fails(&b)},
         "map": o.map.iter().map(|(x, y)| json!({"a": x, "b": y})).collect::<Vec<_>>(),
-        "assertions": rows, "new": n_new, "gone": n_gone, "moved": n_moved, "lost": n_lost, "found": n_found});
+        "assertions": rows, "new": n_new, "gone": n_gone, "moved": n_moved, "lost": n_lost, "found": n_found, "partial": n_cut});
     if let Some(j) = &o.junit {
         std::fs::write(j, junit(&doc, o)).map_err(|e| format!("{j}: {e}"))?;
     }
@@ -265,6 +290,14 @@ fn text(d: &Value) {
     outln!("B: {}  {} assertions, {} failures", d["b"]["file"].as_str().unwrap_or(""), n(&d["b"]["assertions"]), n(&d["b"]["fails"]));
     outln!("{} new, {} gone, {} moved{}", n(&d["new"]), n(&d["gone"]), n(&d["moved"]),
         if n(&d["lost"]) + n(&d["found"]) > 0 { format!("; covers: {} lost, {} found", n(&d["lost"]), n(&d["found"])) } else { String::new() });
+    for r in d["assertions"].as_array().into_iter().flatten().filter(|r| r.get("compared_to").is_some()) {
+        let side = |k: &str| r[k].get("listed").map(|l| format!("{} lists {l} of {} failures", k.to_uppercase(), n(&r[k]["fails"])));
+        let what = [side("a"), side("b")].into_iter().flatten().collect::<Vec<_>>().join(", ");
+        let to = if r["compared_to"].is_null() { "not compared (none listed)".to_string() } else { format!("compared up to the start {}", t(&r["compared_to"])) };
+        let (fa, fb) = (n(&r["a"]["fails"]), n(&r["b"]["fails"]));
+        let all = if fa != fb { format!("; failures in all: A {fa}, B {fb}") } else { String::new() };
+        outln!("  {}: {what} (sva eval --max-attempts): {to}{all}", name_of(r));
+    }
     let covers: Vec<&Value> = d["assertions"].as_array().into_iter().flatten().filter(|r| r["lost"] == true || r["found"] == true).collect();
     for r in &covers {
         let m = |v: &Value| v.as_u64().map_or("—".to_string(), |k| k.to_string());

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Large dumps in VS Code · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html" aria-current="page">Large dumps</a> <a href="keys.html">Keys</a>
+  <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Large dumps in VS Code</h1>
+<p class="lead">A dump of hundreds of megabytes or of gigabytes is not read whole in the VS Code tab. It opens with every module
+  and signal at once, and the values of the signals you look at are read from its FST on the host, for the time in sight. This guide
+  says what that changes: what you see at first, what is drawn as a summary, what needs a signal whole, and what to do when the
+  <code>sva</code> program the tab reads with is missing.</p></header>
+
+<h2 id="example">The example</h2>
+<p>The pictures are of a dump made by <code>tests/guide_shots.py</code>: <code>soc.vcd</code>, 24 MB, a 100 MHz clock over 5.2 ms
+  (1 040 000 changes), a valid / ready stream in <code>u_bus</code> with a burst every 20 µs, two CPU cores whose <code>pc</code> changes
+  every few cycles. It is opened with <code>wavelens.lazy</code> set to <code>always</code>; a VCD of 64 MB or more opens the same way by
+  itself. The tab's host is faked, its reads are the real <code>sva vcd</code> and <code>sva eval</code> the extension runs.</p>
+
+<h2 id="what">What is large</h2>
+<p>The setting <code>wavelens.lazy</code> decides:</p>
+<table>
+  <tr><th>Value</th><th>Read as it is needed</th></tr>
+  <tr><td><code>auto</code> (the default)</td><td>an FST of 4 MB or more, a VCD of 64 MB or more</td></tr>
+  <tr><td><code>always</code></td><td>every dump</td></tr>
+  <tr><td><code>never</code></td><td>none: every dump read whole, cut to <code>dumpBudget</code> (3 000 000 changes)</td></tr>
+</table>
+<p>A dump read whole crosses to the tab as one VCD text per read; that is what makes a 1 GB dump take minutes and the memory
+  of the window. Read as it is needed, the same dump opens in seconds: a 1 GB / 200 ms dump draws its 9 top-level signals in 3 s
+  with 17 MB of the page's memory.</p>
+
+<h2 id="open">What opens first</h2>
+<ol class="steps">
+  <li>A VCD is made an FST once, on the host (<code>sva fst --no-types</code>, a few seconds for 500 MB, a notification while it
+    runs). The FST is kept in the extension's storage by the VCD's path, size and time, so the next open of the same dump reads it
+    at once (the 16 newest are kept). An FST is used as it is.</li>
+  <li>Its header is read (<code>sva vcd --header</code>): every module and every signal, no value. The tab shows them at once, the top
+    level open and its modules folded. The log line under the waves says <i>soc.vcd: 15 signals in 6 modules (read as you open them)</i>.</li>
+  <li>The signals on the screen are read (<code>sva vcd --codes</code>): a row says <i>reading…</i> for a moment, then its waves. Open a
+    module and its signals are read the same way.</li>
+</ol>
+<figure><img src="img/large-open.png" alt="soc.vcd just opened: tb's clk, rst_n and irq drawn, the modules u_bus, u_dma, u_cpu folded" loading="lazy">
+  <figcaption><b>Just opened.</b> The top level's three signals are read; <code>u_bus</code>, <code>u_dma</code> and <code>u_cpu</code> are
+  folded and nothing of them is read yet.</figcaption></figure>
+
+<h2 id="summary">Summary bars and exact windows</h2>
+<p>A row is first read over the whole dump, as a <b>summary</b>:</p>
+<ul>
+  <li>A signal that changes at most <code>lazyKeep</code> times (16 384) comes whole: every change, as in a small dump.</li>
+  <li>A busier one — a clock, a counter, a pc — comes as <code>lazyBuckets</code> (2048) buckets of the dump. A bucket of one or two
+    changes is exact; a denser one is drawn as a bar up to its last change. The value column and the tooltip say <code>…</code> there,
+    never a value that may be wrong.</li>
+</ul>
+<figure><img src="img/large-summary.png" alt="The whole 5.2 ms: clk and the two pc rows as solid bars, their values … at the cursor; rst_n, irq, valid, ready exact" loading="lazy">
+  <figcaption><b>The whole dump.</b> The clocks and the two <code>pc</code> rows change too often for their bucket: bars, and
+  <code>…</code> in the value column at the cursor (1 ms). <code>valid</code>, <code>ready</code>, <code>irq</code> change rarely enough
+  to be read whole.</figcaption></figure>
+<p><b>Zoomed in</b>, the busy rows on the screen are read again for the view and half a span on each side, 150 ms after the zoom or
+  the scroll stops (one read for a burst of wheel steps). A row is exact as soon as it changes at most <code>lazyKeep</code> times in
+  that window. A read made stale by another jump is stopped and its <code>sva</code> killed. A draw never waits for a read: until the
+  window comes, the row shows its summary, hatched where you are zoomed in further than it was read.</p>
+<figure><img src="img/large-window.png" alt="Zoomed to 800 ns at 2721 µs: every clock edge drawn, the pcs' values exact, a burst of valid with its data" loading="lazy">
+  <figcaption><b>800 ns in sight.</b> The same rows read for this window: every clock edge, every <code>pc</code> value, the values in
+  the column.</figcaption></figure>
+<p>A row scrolled away or out of its window goes back to its summary at once; the windows held are at most <code>lazyHeld</code>
+  changes (2 000 000) in all. The narrowest view is a millionth of the dump, but at most 1 ns.</p>
+<p>The edge search (<kbd>[e</kbd> <kbd>]e</kbd>, Tab), the range's counts, the cycles between two times and the tooltip work where a row
+  is held exactly; elsewhere they say <i>zoom in</i>. Never a wrong count.</p>
+
+<h2 id="whole">What needs a signal whole</h2>
+<p>Some features need <b>every change</b> of the signals they use, over the whole dump: the FSM panel (and <code>fsm_stats</code>,
+  <code>fsm_go</code>), the cycles, assertions and expressions, <i>Save as WaveLens</i>. They read such a signal whole first, when it
+  changes at most <code>lazyWhole</code> times (1 000 000); from then on it is a row like any other.</p>
+<p>A busier one is refused, with a message that names it: <i>tb.clk changes 1,040,000 times, more than lazyWhole (1,000,000): the cycles
+  needs every change of it, and this large dump is read by the window</i>. The rest of the page goes on. What else is different:</p>
+<ul>
+  <li><b>Gaps</b> take a busy row by its summary: a dense bucket is busy throughout, the changes between are exact, a busy clock's
+    cycles counted by its period. The gaps are those of the whole dump, their ends within a bucket.</li>
+  <li><b>The bus decoder</b> reads its ports' signals whole first; a port too busy for that says so, the other ports are decoded.</li>
+  <li><b>WaveDrom</b> reads the rows over its time first and refuses one still held in part there.</li>
+  <li>A struct of the <code>.sv</code> types is filled as its signal is read; the analog form is not drawn over a summary.</li>
+  <li>Expressions over a signal too busy to read whole are refused.</li>
+</ul>
+
+<h2 id="sva">Assertions by the CLI</h2>
+<p>An assertion that reads a signal too busy to read whole — any assertion clocked by that 100 MHz clock — is evaluated by the
+  <code>sva</code> program instead, over the whole dump: <code>sva eval</code> on the dump's FST, the names resolved as the panel resolves
+  them (a 5 M-cycle dump in about 5 s). Bind it as usual (<a href="sva.html">Assertions</a>); what comes back:</p>
+<ul>
+  <li>the counts of the whole dump: passes, failures, vacuous, …;</li>
+  <li>the failures and the attempts without a verdict, listed: the first 20 000 (the binding's line says when there are more), on the
+    waves and for <i>Go to first failure</i> and <kbd>]f</kbd> <kbd>[f</kbd>;</li>
+  <li>the passes are counted, and listed only for the time in sight once it is 20 000 cycles or fewer: 0.3 s after the zoom stops,
+    one more <code>sva eval</code> of that window and a span on each side.</li>
+</ul>
+<figure><img src="img/large-sva.png" alt="a_hold bound to tb.u_bus: its failing attempt at 2.72106 ms on the waves, valid dropped while ready is low" loading="lazy">
+  <figcaption><b>A failure found by <code>sva eval</code>.</b> <code>a_hold</code> (a beat offered stays offered until it is taken),
+  bound to <code>tb.u_bus</code>: the beat dropped at 2.721 ms while <code>ready</code> is low.</figcaption></figure>
+<figure><img src="img/large-sva-line.png" alt="The binding's line: tb.u_bus, sva eval: 0 passes of this window; 36 pass, 1 fail, 519958 vacuous" loading="lazy">
+  <figcaption><b>The binding's line.</b> <i>sva eval: …</i> says what is listed: here every failure, and the passes of this window (none:
+  no beat is stalled in it). Its ⓘ says why the CLI evaluated it.</figcaption></figure>
+<p>An attempt that starts before such a window and ends in it is not drawn. <i>Why</i> reads the signals over the attempt first. These
+  results are evaluated again each time, not kept in the browser (a saved state finds its attempt by its cycles). A window
+  whose evaluation failed is said on the binding's line and asked again after 10 s or once the view leaves it.</p>
+
+<h2 id="compare">Compare and runs</h2>
+<p>A compare is of the window in sight (<a href="compare.html">Compare two runs</a>), and on a large dump only that window is read:</p>
+<ul>
+  <li><span class="ui">Compare…</span> runs <code>sva diff</code> on the host over the window; A is the FST the tab reads, a large VCD as B
+    is made an FST once (kept as the tab's are). Neither dump is sent to the tab, only B's values of the signals that differ there
+    (at most 32 MB; more: the bands without B's values, said).</li>
+  <li>A's rows are read exact over the window before they are compared.</li>
+  <li>The Runs panel does the same with a kept run (<a href="runs.html">Runs</a>): a run of gigabytes costs its window. A run shown as A is
+    read as it is needed when it is large.</li>
+</ul>
+
+<h2 id="cli">The sva program</h2>
+<p>Every read above is the <code>sva</code> program on the host (the Linux machine of Remote-SSH or WSL). The extension carries two:
+  Linux x86_64 and Windows x86_64, each used on its own host. A macOS or Linux arm64 host needs one built there
+  (<code>cargo build --release -p sva-cli</code> in <code>sva/</code> of the repository), else <code>sva</code> on the PATH is used. The
+  setting <code>wavelens.sva</code> names another one.</p>
+<p><i>WaveLens: Set the sva program…</i> (also in the tab's ⋯ menu) lists the ones found on the machine — the one set, the one inside
+  the extension, the PATH, <code>~/.cargo/bin</code>, the workspace's builds (<code>bin/windows-x86_64/</code>, <code>sva/target/release/</code>,
+  any <code>sva.exe</code> of it), <code>C:\Tools\wavelens</code> — each tried with <code>--help</code> (✓ runs here, ⚠ why not), or
+  <i>Browse…</i> for its file, or <i>The default</i>. The one picked goes to <code>wavelens.sva</code>.</p>
+<p><b>Without one</b> a large VCD is read whole instead, as before the lazy reading, and the tab says why; VS Code offers <i>Set the sva
+  program…</i>. Once it is set, the tabs read whole for want of it are offered a read again, lazy. An FST cannot be read without it.</p>
+<figure><img src="img/large-nocli.png" alt="The bar's toast: soc.vcd: read whole (not lazy): there is no sva CLI on this host …: set wavelens.sva to its path" loading="lazy">
+  <figcaption><b>No <code>sva</code> on the host.</b> The dump read whole, the reason in the bar and in the log.</figcaption></figure>
+
+<h2 id="limits">Caps and errors</h2>
+<table>
+  <tr><th>What</th><th>Limit</th><th>Then</th></tr>
+  <tr><td>a VCD read whole for want of <code>sva</code></td><td>256 MB</td><td>larger: an error naming the fix (Set the sva program…) instead of a
+    tab loading for minutes</td></tr>
+  <tr><td>one read of signals</td><td>48 MB of text</td><td><i>more than 48 MB of changes at once: fewer signals, or a shorter window</i></td></tr>
+  <tr><td>one read's time</td><td>120 s (<code>WAVELENS_CODES_TIMEOUT</code>, ms)</td><td><i>no answer in 120 s</i>, the read stopped</td></tr>
+  <tr><td>an evaluation by <code>sva eval</code></td><td>10 min (<code>WAVELENS_SVA_TIMEOUT</code>, ms)</td><td>said on the binding's line</td></tr>
+  <tr><td><code>sva</code> programs of a tab at once</td><td>2</td><td>the others wait their turn; an evaluation never takes both, so the waves are
+    still read meanwhile</td></tr>
+</table>
+<ul>
+  <li>A row the reader could not read says <i>not read: …</i> on the row and is not asked again until the dump is read again (⟳,
+    <kbd>R</kbd>).</li>
+  <li>An FST written over by a new run while its tab is open is not read under the old header: the signals not read yet say <i>changed on the
+    disk since it was read: ⟳ (R) reads it again</i>, once. <code>wavelens.autoReload</code> reads it again at once.</li>
+  <li>An <code>sva</code> older than the extension (no <code>--lod</code>, no <code>--cycle-runs</code>) is said with <i>WaveLens: Set the sva
+    program…</i>.</li>
+</ul>
+
+<h2 id="fst">Converting once</h2>
+<p>The FST the tab makes of a large VCD lives in the extension's storage. To keep it beside the dump — smaller, shared, and opened
+  without a conversion next time — right-click the <code>.vcd</code> in the Explorer: <i>WaveLens: Convert to FST</i> (also in the tab's
+  title menu) writes <code>tb.fst</code> beside <code>tb.vcd</code>, with the FSM state names of <code>tb.types.json</code> in it. Open the
+  FST: from 4 MB it is read as it is needed.</p>
+
+<h2 id="shell">The CLI's own</h2>
+<p>The reads of the tab are commands you can run yourself (<a href="../USAGE.md">USAGE.md</a> § An FST as VCD text, § A VCD as an FST):</p>
+<pre>sva fst soc.vcd                                  # soc.fst beside it
+sva vcd soc.fst --header                         # every module and signal, no value
+sva vcd soc.fst --from 2720us --to 2722us --signals 'tb.u_bus.*' --out burst.vcd
+sva eval --waves soc.fst --sva bus_checks.sv --scope tb.u_bus --max-attempts 100
+sva diff golden.fst soc.fst --from 2ms --to 3ms  # two large dumps compared as streams</pre>
+<p>A piece cut with <code>sva vcd --from --to</code> is small enough to open whole, on a page or in a browser
+  (<a href="pages.html">From a dump to a page</a>).</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.63 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

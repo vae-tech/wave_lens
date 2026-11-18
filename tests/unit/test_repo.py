@@ -188,7 +188,7 @@ class Version(unittest.TestCase):
         v = read('VERSION').strip()
         self.assertRegex(v, r'^\d+\.\d+$')                                          # two numbers: MAJOR.MINOR
         self.assertEqual(re.search(r"version: '([^']+)'", read('wavelens', 'src', 'boot.js')).group(1), v)
-        self.assertEqual(re.search(r'^## (\S+)', read('CHANGELOG.md'), re.M).group(1), v)   # the top entry
+        self.assertEqual(re.search(r'^## (?!Unreleased)(\S+)', read('CHANGELOG.md'), re.M).group(1), v)   # the top entry (not the work since it)
         self.assertIn('include_str!("../../../VERSION")', read('sva', 'cli', 'src', 'main.rs'))
         with zipfile.ZipFile(os.path.join(H.ROOT, 'bin', 'wavelens.vsix')) as z:   # the package committed with the version
             self.assertEqual(json.loads(z.read('extension/package.json'))['version'], v + '.0', 'bin/wavelens.vsix: make dist')

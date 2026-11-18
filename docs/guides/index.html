@@ -14,12 +14,13 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="runs.html">Runs</a> <a href="large.html">Large dumps</a> <a href="keys.html">Keys</a>
   <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page">
 <main>
 <header class="hero">
-  <div class="kicker">WaveLens 0.62</div>
+  <div class="kicker">WaveLens 0.63</div>
   <h1>Guides</h1>
   <p class="lead">WaveLens turns a simulator dump (VCD or FST) or a
     <a href="https://wavedrom.com">WaveDrom</a> diagram into one self-contained HTML page: an interactive wave viewer,
@@ -67,6 +68,15 @@
   <a class="card" href="types.html"><img src="img/types-fsm.png" alt="" loading="lazy"><div>
     <h3>12 · State names and structs</h3>
     <p>A VCD from Questa with its FSM states by name and its structs as fields: the design's types from Questa or Verilator, by path.</p></div></a>
+  <a class="card" href="runs.html"><img src="img/runs-compared.png" alt="" loading="lazy"><div>
+    <h3>13 · Runs: keep, browse, compare, slice</h3>
+    <p>VS Code's Runs panel: the dumps of runs before kept with a name, tags and a comment, shown in the tab, compared over the window in sight, a piece of the waves kept as a slice.</p></div></a>
+  <a class="card" href="large.html"><img src="img/large-summary.png" alt="" loading="lazy"><div>
+    <h3>14 · Large dumps in VS Code</h3>
+    <p>A dump of gigabytes in the tab: every module and signal at once, busy signals as a summary and exact when zoomed in, what needs a signal whole, assertions by the CLI, the sva program.</p></div></a>
+  <a class="card" href="keys.html"><img src="img/viewer-keys.png" alt="" loading="lazy"><div>
+    <h3>15 · Keys, menus and the bar</h3>
+    <p>Where the keys go, the box after g z y [ ], the right button's menu, File ▾ and ⚙ ▾, arranging the bar, your own keys, another layout, VS Code, the table of them all.</p></div></a>
 </div>
 
 <h2 id="start">Where to start</h2>
@@ -79,6 +89,9 @@
   <li>You write assertions and want to see why one fails: <a href="sva.html">Assertions</a>.</li>
   <li>You look for a condition over the waves, without an assertion: <a href="sva.html#expressions">Expressions</a>.</li>
   <li>Your dumps are on a server or in WSL and you work in VS Code: <a href="vscode.html">VS Code</a>.</li>
+  <li>You run the same test again and again and want to see what changed since a good run: <a href="runs.html">Runs</a>.</li>
+  <li>You want the keys and menus in one place: <a href="keys.html">Keys, menus and the bar</a>.</li>
+  <li>Your dumps are hundreds of megabytes or more: <a href="large.html">Large dumps in VS Code</a>.</li>
   <li>You write documentation with timing diagrams: <a href="wavedrom.html">WaveDrom</a>.</li>
   <li>You mark up pages from a script or a CI job: <a href="commands.html">Commands and scripts</a>.</li>
   <li>You test with cocotb and want each test on the waves: <a href="cocotb.html">cocotb tests</a>.</li>
@@ -90,7 +103,7 @@
   (<code>tests/guide_shots.py</code>) from the examples' pages; the VS Code one by <code>make vscode-e2e</code>.</p>
 </main>
 </div>
-<footer>WaveLens 0.62 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
+<footer>WaveLens 0.63 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
 </html>

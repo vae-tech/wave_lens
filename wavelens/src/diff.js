@@ -1,4 +1,4 @@
-/* wavelens/src/diff.js — a second dump over the waves (Compare… in the bar's dump group): where its values differ. */
+/* wavelens/src/diff.js — a second dump over the waves (File ▾ → Compare with… in the bar, then Compare): where its values differ. */
 
 /* ---------------- compare with a second dump ---------------- */
 // The same test before and after a change of the RTL, two seeds: the second dump (B, a VCD read by the page's reader)
@@ -162,15 +162,23 @@ Object.assign(WaveView.prototype, {
   // missing, omitted, first, from, to } (null: nothing compared; a newer call or the viewer gone meanwhile: null).
   // win {from, to}: compared over that window only (Compare: the waves in sight), else over all of the page's time; B is
   // read once (over the page's time) and kept: Compare again over another window reads nothing
+  // B picked: what B is and what it was of are set where the compare is made (cmpMade), so a compare that fails keeps the pick
+  // and the one before (review 2026-11-18 B-03); a large dump's rows are read exact over the window first (B-14)
   async compare(file, name, win) {
     const req = this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop();
     if (file == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     const mine = this.cmpRows();
     if (!this.M.timed || !mine.length) {
       this.toast('compare: these waves are clock-sampled (one cell per cycle): open the dump itself (Open…) and compare that'); return null; }
-    const nm = name || file.name || 'B'; this.cmpSrc = { file, name: nm }; this.cmpPick = null;   // what ⟳ reads again (openDump)
-    // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
+    const nm = name || file.name || 'B';
+    // a compare that fails leaves the one before as it was, and says so (its bands are still drawn); B stays picked
     const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
+    const fail = s => { if (req === this.cmpReq && VIEWS.has(this)) { this.toast(s); this.cmpShow(); } return null; };
+    const w0 = win && isFinite(win.from) ? Math.max(win.from, this.M.t0) : this.M.t0, w1 = win && isFinite(win.to) ? Math.min(win.to, this.M.t1) : this.M.t1;
+    if (this.lazy) {   // the rows of a large dump not read yet, or held in part, are no values to compare: read exact over the window
+      try { await this.exactRows(mine, w0, w1, 'a compare'); } catch (e) { this.picHold = null; return fail(`compare: ${e.message}${still()}`); }
+      if (req !== this.cmpReq || !VIEWS.has(this)) { this.picHold = null; return null; }
+    }
     let doc;
     // B's variables that could be these rows (a path, a name, the last part of either: cmpFind's), its changes over their time
     const only = new Set();
@@ -187,12 +195,12 @@ Object.assign(WaveView.prototype, {
       try {   // a File in pieces; a text, or something with a text(), at once
         doc = (typeof file === 'string' ? vcdToWave(file, o) : typeof file.stream === 'function' ? await vcdToWaveFile(file, o) :
           vcdToWave(await file.text(), o)).doc; }
-      catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { this.toast(`${nm}: ${e.message}${still()}`);
-        this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } return null; }
+      catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { fail(`${nm}: ${e.message}${still()}`);
+        this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } this.picHold = null; return null; }
       finally { if (this.cmpReading === req) { this.cmpReading = 0; this.cmpShow(); } }
       this.cmpDoc = { file, name: nm, doc };
     }
-    if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
+    if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) { this.picHold = null; return null; }   // compared again, or no more
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
     for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
     const om = (doc.meta && doc.meta.omitted && doc.meta.omitted.paths) || {}, left = new Set(), leftLeaf = new Map();   // left out by B's reader
@@ -200,13 +208,12 @@ Object.assign(WaveView.prototype, {
       for (const n of ns) { const p = sc ? sc + '.' + n : n; left.add(p); leftLeaf.set(n, (leftLeaf.get(n) || []).concat([p])); }
     }
     const scope = (this.M.src && this.M.src.meta && this.M.src.meta.scope) || '';
-    const w0 = win && isFinite(win.from) ? Math.max(win.from, this.M.t0) : this.M.t0, w1 = win && isFinite(win.to) ? Math.min(win.to, this.M.t1) : this.M.t1;
     const from = Math.max(w0, doc.time.t0 ?? 0), to = Math.min(w1, doc.time.t1 ?? this.M.t1), rows = new Map();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
-    if (to <= from) { this.toast(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ${f(doc.time.t0 ?? 0)} … ` +
-      `${f(doc.time.t1)}): nothing compared${still()}`); return null; }
+    if (to <= from) { this.picHold = null; return fail(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ` +
+      `${f(doc.time.t0 ?? 0)} … ${f(doc.time.t1)}): nothing compared${still()}`); }
     if (!left.size && !mine.some(a => cmpFind(bs, byLeaf, a, scope))) {   // as sva diff: nothing to compare is no compare (the one before stays)
-      this.toast(`${nm}: none of these ${mine.length} signals is in it: nothing compared${still()}`); return null; }
+      this.picHold = null; return fail(`${nm}: none of these ${mine.length} signals is in it: nothing compared${still()}`); }
     this.cmpBack();   // these rows' own values again: compared with B, or the one before
     let differ = 0, missing = 0, omitted = 0; const byName = [];
     for (const a of mine) {
@@ -222,8 +229,11 @@ Object.assign(WaveView.prototype, {
       rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null, by, row: spans.length && !other ? b : null });
       if (spans.length) differ++;
     }
+    this.picHold = null;
     this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
-      byName, waves: true };
+      byName, waves: true, a: this.runsA(), asked: win ? { from: w0, to: w1 } : null };
+    this.cmpSrc = { file, name: nm };   // what ⟳ reads again (openDump), Compare compares again over another window
+    if (this.cmpPick && this.cmpPick.file === file) this.cmpPick = null;   // the pick is the compare now (a later pick stays)
     this.cmpMarks(); this.cmpShow(); this.draw();
     const c = this.cmp, who = this.cmpWho();
     const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}${who}` +
@@ -231,7 +241,8 @@ Object.assign(WaveView.prototype, {
       (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)}${win ? '' : ' (both dumps)'}` : '') +
       (byName.length ? ' · ' + cmpByName(c) : '');
     this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
-    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length, rank: c.rank };
+    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length, rank: c.rank,
+      ...(c.asked ? { asked: c.asked } : {}) };
   },
   // who differed first and what followed (the compare's rank), for its toast: " · first PSEL, then PENABLE +10 ns"
   cmpWho() {
@@ -249,7 +260,7 @@ Object.assign(WaveView.prototype, {
       if (x.missing || x.omitted) missing.push(cmpPath(r));
       else signals[cmpPath(r)] = Object.assign({ spans: x.spans }, x.other ? { other: x.other } : {});
     }
-    return { name: c.name, from: c.from, to: c.to, first: c.first, signals, missing };
+    return Object.assign({ name: c.name, from: c.from, to: c.to, first: c.first, signals, missing }, c.a ? { a: c.a } : {}, c.asked ? { asked: c.asked } : {});
   },
   // the compare result of a row: a struct's group row its vector, a row of your groups its signal, a bit of a bus its own
   cmpOf(r) {
@@ -312,10 +323,13 @@ Object.assign(WaveView.prototype, {
     if (walk) walk.parentElement.hidden = !this.cmp;
     if (g && g.hidden === on) { g.hidden = !on; this.layoutShow(); }
     if (this.cmpReading) { b.hidden = false; b.textContent = '≠ … ✕'; b.title = 'reading the second dump: click to stop'; return; }
-    b.hidden = !this.cmp && !pend; b.textContent = this.cmp ? `≠ ${this.cmp.differ} ✕` : `B: ${this.cmpPendName()} ✕`;
+    // nothing compared, a pick: B's name, else A's (only A picked: its waves open with Compare; B-23)
+    const pb = this.cmpPicked().b, pickTxt = pb ? `B: ${this.cmpPendName()}` : `A: ${this.runName(this.runPickA)}`;
+    b.hidden = !this.cmp && !pend; b.textContent = this.cmp ? `≠ ${this.cmp.differ} ✕` : `${pickTxt} ✕`;
     b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :
       ''}${this.cmp.byName.length ? `; ${cmpByName(this.cmp)}` : ''}; ]d [d go to the differences; click: compare no more` :
-      pend ? `${this.cmpPendName()} picked, not compared yet: Compare (g=) compares it; click: drop it` : '';
+      pend ? (pb ? `${this.cmpPendName()} picked, not compared yet: Compare (g=) compares it; click: drop it` : `A ${this.runName(this.runPickA)} ` +
+        'picked: Compare (g=) opens its waves here (pick B too: a run in the Runs panel); click: drop it') : '';
   },
   // the red bands of a dump compared (paintCmp); B shown: the time it does not cover shaded
   paintDiff(P, lay, X, t0, t1) {
@@ -341,7 +355,7 @@ Object.assign(WaveView.prototype, {
   },
   // why this view cannot be shown, '' when it can
   cmpCant(show) {
-    if (!this.cmp) return `compare ${show}: compare with a second dump first (Compare… in the bar)`;
+    if (!this.cmp) return this.cmpNone(`compare ${show}`);
     return show === 'a' || this.cmpCan() ? '' : `compare ${show}: this compare has the differences only, not the values of ${this.cmp.name} ` +
       '(a saved one, a cut too large for the page, one of --align): compare again';
   },
@@ -387,20 +401,41 @@ Object.assign(WaveView.prototype, {
     this.root.dispatchEvent(new CustomEvent('wavelens:compare', { detail: { show, name: show === 'a' ? na : nb } }));
     return show;
   },
+  // The picks (review 2026-11-18 A-02): one object, cmpPicked() {a, b} — a: a run's id picked as A (its waves open with Compare),
+  // b: B, one slot for both kinds, {run: id} of the Runs panel or {file: {file | path, name, show?}} of Compare… — so the later
+  // pick of B wins, whichever kind (B-08). runPickA, runPickB and cmpPick read and write it (runs.js): setting one kind of B to
+  // null leaves a pick of the other kind. A compare made of a pick clears it; one that fails keeps it.
+  cmpPicked() { return this.cmpPk || (this.cmpPk = { a: null, b: null }); },
   // B picked, nothing compared yet: a file of Compare… (a File here, a path the host picked) or a run of the Runs panel (B, A
   // picked: runs.js) — Compare (g=, the bar's, c in the Runs panel) compares A and B over the window in sight
   comparePick(b, quiet = false) {
-    if (b) { this.runsDrop(); this.runPickB = null; if (this.runsP) this.runsP.render(); }   // a file is B now: a run's compare asked not taken
-    this.cmpPick = b || null; this.cmpShow();
+    const p = this.cmpPicked();
+    if (b) { this.runsDrop(); p.b = { file: b }; if (this.runsP) this.runsP.render(); }   // a file is B now: a run's compare asked not taken
+    else if (p.b && p.b.file) p.b = null;
+    this.cmpShow();
     if (b && !quiet) this.toast(`B: ${b.name} picked · Compare (g=) compares it with these waves over the window in sight`);
     return this;
   },
   // the name of what is picked (the bar's B: …)
-  cmpPendName() { return this.cmpPick ? this.cmpPick.name : this.runPickB != null ? this.runName(this.runPickB) :
+  cmpPendName() { const b = this.cmpPicked().b; return b ? (b.file ? b.file.name : this.runName(b.run)) :
     this.runPickA != null ? `A ${this.runName(this.runPickA)}` : ''; },
+  // what d, D, ]d, gb, … say with no compare on the waves: B picked (Compare compares it), else how to get one (B-23)
+  cmpNone(what) {
+    return this.cmpPicked().b ? `${what}: B ${this.cmpPendName()} is picked, not compared yet: Compare (g=) compares it` :
+      `${what}: compare with a second dump first (pick B: File ▾ → Compare with…, gC, or a run in the Runs panel, gu; then Compare, g=)`;
+  },
   // ✕: compared no more, and nothing picked
-  compareOff() { this.runPickA = this.runPickB = null; this.cmpPick = null; if (this.cmp) this.compare(null); else this.cmpShow();
+  compareOff() { this.cmpPk = { a: null, b: null }; if (this.cmp) this.compare(null); else this.cmpShow();
     if (this.runsP) this.runsP.render(); return this; },
+  // how the compare on the waves is made again over another window (Compare): {run} a run of the Runs panel, {path, name} a file
+  // the host compares, {file, name} a dump read here; null when it cannot be — a result given whole (a saved view, a tool's, the
+  // page's own): Compare is not lit for it, and says so (review 2026-11-18 A-01, M-02)
+  cmpRedo() {
+    const c = this.cmp, h = this.runsHost(); if (!c) return null;
+    if (this.runCur != null) return h ? { run: this.runCur } : null;
+    if (c.result) { const p = c.result.src && c.result.src.path; return typeof p === 'string' && p && h && h.compareFile ? { path: p, name: c.name } : null; }
+    return this.cmpSrc || null;
+  },
   // what a Compare waits for: a file picked, a run picked as A or B (the Runs panel) that is not the compare on the waves
   cmpPend() { return !!this.cmpPick || (this.runPickA != null && this.runPickA !== this.runsA()) || (this.runPickB != null && this.runPickB !== this.runCur); },
   // Compare's look after the window moved (draw): lit, its title, only when that changed
@@ -410,31 +445,36 @@ Object.assign(WaveView.prototype, {
     for (const g of gs) if (g) g.classList.toggle('stale', !!st);
     if (gs[0] && gs[0].hidden === !!st) { gs[0].hidden = !st; this.layoutShow(); }   // the bar's: shown while it has something to do
   },
-  // the compare on the waves is not of the window in sight (zoomed, panned: '' when it is) -> why, for the button
+  // the compare on the waves is not of the window in sight (zoomed, panned: '' when it is) -> why, for the button. The window
+  // asked is the compare's own (asked), not the time its result covers: the host rounds it to ps, B may end before it (B-01); a
+  // compare of all the time, or one that cannot be made again (cmpRedo), is never stale
   cmpStale() {
     if (this.cmpPend()) return 'B or A picked';
-    if (!this.cmp || !this.runsWindow) return '';
+    const c = this.cmp; if (!c || !c.asked || !this.cmpRedo()) return '';
     const w = this.runsWindow(), e = Math.max(this.span * 1e-6, 1e-9);
-    return Math.abs(w.from - this.cmp.from) > e || Math.abs(w.to - this.cmp.to) > e ? 'the window moved since' : '';
+    return Math.abs(w.from - c.asked.from) > e || Math.abs(w.to - c.asked.to) > e ? 'the window moved since' : '';
   },
   // Compare: A and B over the window in sight (your span chosen in the Runs panel: that span) — a run picked (runs.js runsGo:
   // A opened first when picked), else the file picked, else the one compared again over the window of now
   async compareGo() {
     if (this.runPickB != null || this.runPickA != null || (this.runCur != null && !this.cmpPick)) return this.runsGo();
-    const c = this.cmp, p = this.cmpPick || (c && c.result && c.result.src && c.result.src.path ? { name: c.name, path: c.result.src.path } :
-      c && !c.result && this.cmpSrc ? this.cmpSrc : null);
-    if (!p) { this.toast('Compare: pick B first — Compare… (gC) a dump, or a run in the Runs panel (gu)'); return null; }
-    const w = this.runsWindow(), sh = c ? this.cmpRun : p.show || 'a';
+    const c = this.cmp, pick = this.cmpPick, p = pick || this.cmpRedo();
+    if (!p) { this.toast(c ? `Compare: the compare with ${c.name} was given made (a saved view, a tool, the page's own) and is not made again here — ` +
+      'pick B again (File ▾ → Compare with…, gC), then Compare' :
+      'Compare: pick B first — File ▾ → Compare with… (gC) a dump, or a run in the Runs panel (gu)'); return null; }
+    const w = this.runsWindow(), sh = c ? this.cmpRun : p.show || 'a', asked = { from: w.from, to: w.to };
     if (!p.path) { const r = await this.compare(p.file, p.name, w); if (r && sh !== 'a' && this.cmpCan()) await this.compareView(sh, true); return r; }
     const h = this.runsHost(); if (!h || !h.compareFile) { this.toast('Compare: the host compares a file it picked (VS Code)'); return null; }
-    const still = this.cmpAsk();
+    // the host's sva diff is stopped by a newer ask, ✕ or no B (runsDrop: runs cancel; review 2026-11-18 V-03)
+    const still = this.cmpAsk(), req = this.runWait = this.runReq;
     this.cmpReading = this.cmpReq; this.cmpShow(); this.toast(`comparing with ${p.name} over the window in sight…`);
     let m; try { m = await h.compareFile(p.path, this.runsSignals(), w.from, w.to, this.runsA()); } catch (e) { m = { error: e.message }; }
+    if (this.runWait === req) this.runWait = 0;
     if (this.cmpReading) { this.cmpReading = 0; }
     if (!still()) return null;
     if (m.error || !m.result) { this.cmpShow(); this.toast(`${p.name}: ${m.error || 'no answer'}`); return null; }
-    this.cmpPick = null;
-    const r = this.compareResult(m.result);
+    if (pick && this.cmpPick === pick) this.cmpPick = null;   // the pick is the compare now (a later one stays)
+    const r = this.compareResult(Object.assign(m.result, { a: this.runsA() || null, asked }), false, { asked });
     if (r && sh !== 'a' && this.cmpCan()) await this.compareView(sh, true);
     return r;
   },
@@ -446,9 +486,9 @@ Object.assign(WaveView.prototype, {
     return this;
   },
   // d: the other run (from the overlay: A); D: the overlay, again the run before it
-  cmpFlip() { if (!this.cmp) { this.toast('d: compare with a second dump first (Compare… in the bar)'); return this; }
+  cmpFlip() { if (!this.cmp) { this.toast(this.cmpNone('d')); return this; }
     this.compareView(this.cmpRun === 'b' ? 'a' : this.cmpRun === 'overlay' ? 'a' : 'b'); return this; },
-  cmpBoth() { if (!this.cmp) { this.toast('D: compare with a second dump first (Compare… in the bar)'); return this; }
+  cmpBoth() { if (!this.cmp) { this.toast(this.cmpNone('D')); return this; }
     this.compareView(this.cmpRun === 'overlay' ? this.cmpLast || 'a' : 'overlay'); return this; },
   // the value at the cursor in the overlay: both when they differ
   valueBoth(s, t) {
@@ -463,9 +503,10 @@ Object.assign(WaveView.prototype, {
     return v === String(this.valueAt(r, t)) ? '' : `\n${b ? 'A' : 'B'}: ${v}`;
   },
   // a compare result already made (sva diff's, by the build from the config's "compare", or the command compare): the WaveJSON
-  // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path]} over these waves, as compare()
-  // puts a dump read here; null: compared no more. quiet: no toast (the page opens with it) -> as compare()
-  compareResult(c, quiet) {
+  // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path], asked?, a?, run?, src?} over these
+  // waves, as compare() puts a dump read here; null: compared no more. quiet: no toast (the page opens with it). of.asked (else
+  // the result's asked): the window Compare asked, which tells it stale (A-01) -> as compare()
+  compareResult(c, quiet, of = {}) {
     this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop();
     if (c == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     c = cmpNorm(c);
@@ -485,8 +526,10 @@ Object.assign(WaveView.prototype, {
       rows.set(a, { spans, other: s.other || null, by: null, b: s.b || null });
       if (spans.length) differ++;
     }
+    const win = of.asked || c.asked, asked = win && isFinite(win.from) && isFinite(win.to) ? { from: +win.from, to: +win.to } : null;
     this.cmp = { name: c.name, rows, differ, missing, omitted: 0, compared: rows.size - missing, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
-      byName: [], result: Object.assign({}, c, { from, to }) };
+      byName: [], a: this.runsA(), asked, result: Object.assign({}, c, { from, to, a: this.runsA() || undefined }, asked ? { asked } : {}) };
+    if (!this.cmp.result.a) delete this.cmp.result.a;   // of these waves: A, the run shown (none: the dump of now)
     this.cmpMarks(); this.cmpShow(); this.draw();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
     const who = this.cmpWho();
@@ -494,13 +537,14 @@ Object.assign(WaveView.prototype, {
       (missing ? ` · ${missing} not in it` : '') + (from > t0 || to < t1 ? ` · compared ${f(from)} … ${f(to)}` : '');
     if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
     this.log('ok', 'compared with ' + said);
-    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank };
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank,
+      ...(asked ? { asked } : {}) };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to). In the view: a row drawn, a row of your
   // groups standing for its signal (.orig: Only keeps your groups whole, the signal's module left out)
   diffStep(dir) {
-    if (!this.cmp) { this.toast(']d [d: compare with a second dump first (Compare… in the bar)'); return this; }
+    if (!this.cmp) { this.toast(this.cmpNone(']d [d')); return this; }
     const s = this.sel && this.cmpOf(this.sel), some = this.onlyOn() || this.hiddenRows.size;
     const drawn = () => { if (this.rowsStale) this.allRows(); return new Set((this.rowsAll || []).map(r => r.orig || r)); };
     const ts = s && s.spans.length ? s.spans.map(([a]) => a) : !some ? this.cmp.starts :

@@ -629,8 +629,13 @@ async function evaluateScope(v, bs, progress) {
 // failures and attempts without verdict listed (at most SVA.cli.failures), not its passes; the cycles' times as runs. The passes of
 // the time shown come when it is narrow enough (Panel.winWant: an evaluation of that window)
 // SVA.cli: failures, the most failures listed; cycles, the most cycles shown for the passes of a window; passes, the most
-// listed of one window; pause (ms) before a window is asked
-SVA.cli = { failures: 20000, cycles: 20000, passes: 50000, pause: 300 };
+// listed of one window (the window asked is narrowed to as many cycles: an attempt starts on each); pause (ms) before a
+// window is asked; retry (ms): a window whose evaluation failed is asked again after it (review 2026-11-18 B-16)
+SVA.cli = { failures: 20000, cycles: 20000, passes: 50000, pause: 300, retry: 10000 };
+// a window of a CLI binding (c.win, c.ask) holds the view tA … tB: inside its time (a cut one: up to its last listed start),
+// or the very view it was asked for (a list cut whatever the window: not asked again and again); a failed one a while
+const winHas = (w, tA, tB) => !!w && !(w.error && Date.now() - w.at >= SVA.cli.retry) && ((w.a <= tA && w.b >= tB) ||
+  (!!w.view && Math.abs(w.view[0] - tA) + Math.abs(w.view[1] - tB) <= 1e-6 * (tB - tA)));
 const tooBusy = (v, rows) => rows.some(r0 => { const q = r0.orig || r0, r = q.dupOf || q.of || q;
   return !!(r.sum && r.sum.part && r.sum.part.n > v.S.lazyWhole); });
 const cliReq = (v, scope, asserts, more) => Object.assign({ files: active().map(f => ({ name: f.name, source: f.source })), scope: scope || '', asserts,
@@ -638,6 +643,7 @@ const cliReq = (v, scope, asserts, more) => Object.assign({ files: active().map(
 // the cycles' times of a results JSON written with --cycle-runs ([first, step, count] each) as one array per clock, the
 // last few kept (a window's are the same clock's)
 const RUNS = new Map(), RUNS_OF = new WeakMap();   // RUNS_OF: such an array -> its runs (the report takes those: summary.rs)
+SVA.cliRuns = RUNS;   // (the tests: a window's answer is read without expanding its runs, review 2026-11-13 B-21)
 function fromRuns(runs) {
   const k = JSON.stringify(runs);
   if (RUNS.has(k)) return RUNS.get(k);
@@ -722,8 +728,70 @@ const RANK = { vacuous: 0, pass: 1, active: 2, capped: 3, disabled: 4, fail: 5 }
 const STRIP = { S: 1, P: 2, C: 3, D: 4, F: 5 }, STRIP_COL = [null, 'muted', 'sva-pass', 'sva-capped', 'sva-disabled', 'sva-fail'];
 const MANY = 20;   // arrows of every attempt on screen below this many
 const globRx = U.glob;
-const shown = S => { const l = S.svaShow == null ? null : (Array.isArray(S.svaShow) ? S.svaShow : String(S.svaShow).split(',')).map(s =>
-  s.trim()).filter(Boolean).map(globRx); return n => !l || l.some(rx => rx.test(n)); };
+/* ---------------- finding assertions: the panel's ⌕, svaShow, the command sva ---------------- */
+// A query: terms apart by blanks, every one holds; a term's alternatives apart by commas, one of them holds; ! before a
+// term: it does not. @x a signal of it (its name as its source writes it, or the full path it was bound to), in:x the
+// instance it is bound to, is:x its state, any other term its label (or label@instance). * and ? mask the whole text, a
+// term without them is a part of it; any case. A term not understood (is:what, a bare @) is said and filters nothing
+const QUERY_IS = ['fail', 'pass', 'vacuous', 'cover', 'assert', 'assume', 'unbound', 'error', 'capped', 'running'];
+const QUERY_RES = new Set(['fail', 'pass', 'vacuous', 'capped']);   // what only results say ("still evaluating" until they are there)
+const QUERY_WHAT = { name: 'a name after !', sig: 'a signal after @', in: 'an instance after in:', is: `one of ${QUERY_IS.join(' ')} after is:` };
+const qPat = s => {
+  const low = s.toLowerCase(); if (!/[*?]/.test(s)) return x => String(x).toLowerCase().includes(low);
+  const rx = new RegExp('^' + [...low].map(c => (c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.+^${}()|[\]\\]/g, '\\$&'))).join('') + '$', 'i');
+  return x => rx.test(String(x));
+};
+function svaQuery(text) {   // -> {text, terms: [{neg, kind: name | sig | in | is, alts, text}], errors, needs: whether a term needs results}
+  const q = String(text == null ? '' : text).trim(), terms = [], errors = [];
+  for (const raw of q ? q.split(/\s+/) : []) {
+    const neg = raw[0] === '!', m = /^(@|in:|is:)?([\s\S]*)$/i.exec(neg ? raw.slice(1) : raw);
+    const kind = { '@': 'sig', 'in:': 'in', 'is:': 'is' }[(m[1] || '').toLowerCase()] || 'name', alts = m[2].split(',').filter(Boolean);
+    if (!alts.length) { errors.push(`"${raw}": ${QUERY_WHAT[kind]}`); continue; }
+    if (kind !== 'is') { terms.push({ neg, kind, alts: alts.map(qPat), text: raw }); continue; }
+    const w = alts.map(x => x.toLowerCase()), bad = w.filter(x => !QUERY_IS.includes(x));
+    if (bad.length) errors.push(`"${raw}": ${bad.join(', ')} is no state (${QUERY_IS.join(' ')})`); else terms.push({ neg, kind, alts: w, text: raw });
+  }
+  return { text: q, terms, errors, needs: terms.some(t => t.kind === 'is' && t.alts.some(w => QUERY_RES.has(w))) };
+}
+// the states of a binding b of assertion a (b null: a bound nowhere): its kind, unbound, running, error, and once its
+// results are there fail (an assertion that failed), pass (no failure and a pass; a cover: a match), vacuous (neither), capped
+function queryIs(a, b) {
+  const s = new Set([(a && a.kind) || 'assert']); if (!b) { s.add('unbound'); return s; }
+  if (b.running) s.add('running');
+  if (b.error || b.state === 'cannot' || b.state === 'unknown') s.add('error');
+  const o = outcome(b), st = (o && o.stats) || {}, cover = o && o.kind === 'cover', hit = cover ? st.matches ?? st.pass : st.pass;
+  if (o && cover) s.add('cover');
+  if (o) s.add(!cover && st.fail > 0 ? 'fail' : hit > 0 ? 'pass' : 'vacuous');
+  if (st.capped > 0) s.add('capped');
+  return s;
+}
+// what a query reads of a binding (or of an assertion bound nowhere): its label, instance, the signals by their names in its
+// source and in its results, their full paths (the rows they were bound to, map: name -> row; the results' paths)
+function queryItem(a, b, map) {
+  const o = b && outcome(b), rs = Object.values(map || (b && b.res && b.res.map) || {}), os = (o && o.signals) || {};
+  return { label: a ? a.label : b.assert, scope: b ? b.scope || '' : null, sigs: [...(a ? a.signals.map(s => s.name) : []), ...Object.keys(os)],
+    fulls: [...rs.flatMap(r => [r.full, ...(r.src ? [r.src.path, r.src.abs] : [])].filter(Boolean)), ...Object.values(os)], is: queryIs(a, b) };
+}
+function queryMatch(Q, it) {
+  return Q.terms.every(t => t.neg !== (t.kind === 'is' ? t.alts.some(w => it.is.has(w)) : t.alts.some(p => (t.kind === 'name' ?
+    [it.label, ...(it.scope ? [`${it.label}@${it.scope}`] : [])] : t.kind === 'sig' ? [...it.sigs, ...it.fulls] : it.scope == null ? [] :
+      [it.scope || '(top)']).some(p))));
+}
+// svaShow: labels and * patterns (a list, or a text with commas) as before; a text with a query's terms (@, in:, is:, !, two
+// words) a query -> null (every one drawn) | item -> drawn
+const QUERY_LIKE = /(^|[\s,])(!|@|in:|is:)|[^\s,]\s+[^\s,]/i;
+function showOf(S) {
+  const x = S.svaShow; if (x == null) return null;
+  if (!Array.isArray(x) && QUERY_LIKE.test(String(x))) { const Q = svaQuery(x); return Q.terms.length ? it => queryMatch(Q, it) : null; }
+  const l = (Array.isArray(x) ? x : String(x).split(',')).map(s => String(s).trim()).filter(Boolean).map(globRx);
+  return it => l.some(rx => rx.test(it.label));
+}
+// the live search's {query, mask} of a setting or a state: a text alone is a query; else null
+const filterOf = x => (typeof x === 'string' ? { query: x.trim(), mask: false } : x && typeof x === 'object' && !Array.isArray(x) ?
+  { query: String(x.query == null ? '' : x.query).trim(), mask: !!x.mask } : null);
+// which bindings are drawn: the search's matches while its Mask is on (and it says something), else svaShow -> null (all) | item -> drawn
+const drawnOf = (S, f) => { const Q = f && f.mask && svaQuery(f.query); return Q && Q.terms.length ? it => queryMatch(Q, it) : showOf(S); };
+SVA.query = { parse: svaQuery, item: queryItem, match: queryMatch, is: queryIs, show: showOf, like: s => QUERY_LIKE.test(String(s)) };   // (the tests)
 // the index of the first item with time >= t (lastBefore + 1)
 const firstFrom = (n, at, t) => lastBefore(n, at, t) + 1;
 // the hit under (x, y) of a lane's bars [a, b, y0, y1, x] / of a step row's circles [x, p]
@@ -1116,6 +1184,7 @@ class Panel {
       this.bindings.push({ assert: b.assert, scope: b.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results),
         ...(pb && pb.error ? { error: pb.error } : {}) });
     }
+    this.qInit();
     LIB.panels.add(this);
   }
   // bindings, removed ones, hidden assertions, and the results evaluated here when they are small (with the files they
@@ -1190,11 +1259,12 @@ class Panel {
       // results of another text of the assertion (an edit, a reload; the page's results of a file this browser replaced): gone
       const x = LIB.byLabel.get(b.assert), sig = x ? asig(x.a) : null;
       if (b.results && ((b.asig !== undefined && b.asig !== sig) || (b.fromPage && x && changedHere(x.a, x.file)))) { b.results = null; b.fromPage = false;
-        this.dropSel(b); }
+        this.dropSel(b); this.winStop(b); b.cli = null; }
       b.asig = sig;
       this.check(b);
       const kept = this.saved.results && this.saved.src === LIB.src && this.saved.wave === this.wave() && this.saved.results[bkey(b)];
-      if (b.state === 'bound' && ((outcome(b) || {}).missing || []).length) b.results = null;   // the build did not find a name the page does: evaluated here
+      // the build did not find a name the page does: evaluated here
+      if (b.state === 'bound' && ((outcome(b) || {}).missing || []).length) { b.results = null; this.winStop(b); b.cli = null; }
       if (!b.results && b.state === 'bound' && kept && !(outcome({ results: kept }).missing || []).length) b.results = kept;
     }
     this.render(); this.redraw();
@@ -1226,21 +1296,29 @@ class Panel {
   // A binding evaluated by the CLI (a large dump: evaluateCli): the time shown narrow enough (SVA.cli.cycles at most),
   // after a pause, the attempts of that time and a span either side: sva eval of that window (attempts start in it, the
   // values before it read), one for every CLI binding of its scope; listed with the whole dump's failures. A window there
-  // already, asked, or one that failed (asked again once the view leaves it): nothing asked
+  // already, asked, or one that failed (asked again once the view leaves it or after SVA.cli.retry): nothing asked
   winWant(b, tA, tB) {
     const c = b.cli;
     if (!c || this.v.sva !== this || !this.bindings.includes(b) || !b.results || !this.v.opts.evalSva) return;
     const T = b.results.cycles, n = firstFrom(T.length, i => T[i], tB) - firstFrom(T.length, i => T[i], tA);
     const wide = n > SVA.cli.cycles;
     if (wide !== !!c.wide) { c.wide = wide; this.renderB(b); }
-    const has = w => w && w.a <= tA && w.b >= tB;
-    if (wide || has(c.win) || has(c.ask)) return;
+    if (wide || winHas(c.win, tA, tB) || winHas(c.ask, tA, tB)) return;
     clearTimeout(c.t);
     c.t = setTimeout(() => this.winRead(b, tA, tB), SVA.cli.pause);
   }
   async winRead(b, tA, tB) {
-    const span = tB - tA, a = Math.max(0, Math.floor(tA - span)), z = Math.ceil(tB + span), has = w => w && w.a <= tA && w.b >= tB;
-    if (!b.cli || this.v.sva !== this) return;   // (a viewer gone meanwhile)
+    const span = tB - tA, has = w => winHas(w, tA, tB);
+    let a = Math.max(0, Math.floor(tA - span)), z = Math.ceil(tB + span);
+    if (!b.cli || this.v.sva !== this || !b.results) return;   // (a viewer gone meanwhile)
+    // at most SVA.cli.passes cycles: one attempt starts on each, so its list is not cut (one cut lists the passes from its
+    // left only: review 2026-11-18 B-07); the view in the middle
+    const T = b.results.cycles, at = t => firstFrom(T.length, i => T[i], t), cap = SVA.cli.passes - 2;
+    if (T.length && at(z) - at(a) > cap) {
+      const v0 = at(tA), v1 = at(tB), side = Math.max(0, Math.floor((cap - (v1 - v0)) / 2));
+      a = Math.max(a, Math.min(Math.floor(tA), Math.floor(T[Math.max(0, v0 - side)])));
+      z = Math.min(z, Math.max(Math.ceil(tB), Math.ceil(T[Math.min(T.length - 1, v1 + side)])));
+    }
     const bs = this.bindings.filter(x => x.cli && x.scope === b.scope && x.results && !has(x.cli.win) && !has(x.cli.ask));
     if (!bs.includes(b)) return;
     bs.forEach(x => { clearTimeout(x.cli.t); this.winStop(x); });
@@ -1253,7 +1331,8 @@ class Panel {
       const got = mine();
       got.forEach(x => { x.cli.ask = null; });
       if (e.stopped || !got.length || this.v.sva !== this) return;
-      got.forEach(x => { x.cli.win = { a, b: z, n: 0, fails: 0, error: e.message }; this.renderB(x); });   // not asked again here
+      // not asked again here a while (SVA.cli.retry)
+      got.forEach(x => { x.cli.win = { a, b: z, n: 0, fails: 0, error: e.message, at: Date.now() }; this.renderB(x); });
       this.toast(`${got.map(x => x.assert).join(', ')}: the attempts of this window: ${e.message}`);
       return;
     }
@@ -1262,14 +1341,17 @@ class Panel {
     for (const x of got) {
       x.cli.ask = null;
       const w = doc.assertions.find(o => o.name === x.assert);
-      if (w) this.winTake(x, w, (w.cycle_runs || doc.cycle_runs || []).reduce((n, r) => n + r[2], 0), a, z);
+      if (w) this.winTake(x, w, (w.cycle_runs || doc.cycle_runs || []).reduce((n, r) => n + r[2], 0), a, z, [tA, tB]);
     }
     if (got.length) { this.redraw(); this.explain(); }   // its rows again (the names column too: their layout)
   }
   // a window's attempts with a verdict in it (one running at its end, or failed by a strong operator there, has none): its
-  // passes, and its failures past the whole dump's list (cut at SVA.cli.failures), merged with that list; n: its cycles
-  winTake(b, w, n, a, z) {
-    const c = b.cli, key = x => x.start + ':' + x.end, have = new Set(c.o.attempts.map(key));
+  // passes, and its failures past the whole dump's list (cut at SVA.cli.failures), merged with that list; n: its cycles.
+  // A list cut all the same (another clock's binding, SVA.cli.passes under the view's cycles): it holds its window's
+  // attempts up to its last listed start, the window ends there (and the view it was asked for: winHas)
+  winTake(b, w, n, a, z, view = null) {
+    const c = b.cli; if (!c || !b.results) return;   // (results sync() dropped meanwhile: review 2026-11-18 B-15)
+    const key = x => x.start + ':' + x.end, have = new Set(c.o.attempts.map(key));
     const done = x => x.result !== 'vacuous' && x.result !== 'active' && !(x.reason && x.reason.kind === 'strong_end') && x.end < n - 1;
     const add = (w.attempts || []).filter(x => done(x) && !have.has(key(x)));
     const all = c.o.attempts.concat(add).sort((x, y) => x.start - y.start || x.end - y.end);
@@ -1277,8 +1359,9 @@ class Panel {
     const o = Object.assign({}, c.o, { attempts: all });
     o.laneList = laneOf(o);
     b.results = Object.assign({}, b.results, { assertions: [o] });
-    c.win = { a, b: z, n: add.filter(x => x.result === 'pass').length, fails: add.filter(x => x.result !== 'pass').length,
-      cut: !!(w.listed && w.listed.of) };
+    const cut = !!(w.listed && w.listed.of), T = b.results.cycles, rest = (w.attempts || []).filter(x => x.result !== 'fail');
+    const upto = !cut ? z : rest.length ? Math.min(z, T[rest.reduce((m, x) => Math.max(m, x.start), 0)]) : a;
+    c.win = { a, b: upto, view, n: add.filter(x => x.result === 'pass').length, fails: add.filter(x => x.result === 'fail').length, cut };
     if (was) { this.selA.i = all.findIndex(x => x.start === was.start && x.end === was.end); if (this.selA.i < 0) this.selA = null; }
     this.renderB(b);
   }
@@ -1309,6 +1392,7 @@ class Panel {
         // old text's, evaluated again
         const stale = ok.filter(b => sigOf(b) !== sig0.get(b));
         stale.forEach(b => { b.results = null; b.cli = null; b.error = null; });
+        ok.filter(b => !stale.includes(b)).forEach(b => { b.asig = sig0.get(b); });   // the text they are of: an edit drops them (sync)
         for (const b of ok) { b.running = false; b.msg = null; b.fromPage = false; this.dropSel(b); this.renderB(b); this.changed(b, false); }
         if (stale.length) this.evaluateMany(stale.filter(b => this.bindings.includes(b)));
         this.redraw();
@@ -1331,7 +1415,8 @@ class Panel {
     if (this.dirty) this.place();
     return this.at.get(g ? g.id : -1) || [];
   }
-  drawn() { const ok = shown(this.v.S); return this.bindings.filter(b => outcome(b) && (b.state === 'bound' || b.state === 'dump') && ok(b.assert)); }
+  drawn() { const Q = this.qMask(), ok = Q ? it => queryMatch(Q, it) : showOf(this.v.S);   // the search's Mask over svaShow
+    return this.bindings.filter(b => outcome(b) && (b.state === 'bound' || b.state === 'dump') && (!ok || ok(this.itemOf(b)))); }
   place() {
     this.dirty = false; this.at = new Map();
     const v = this.v, S = v.S, list = this.drawn(), n = new Map();
@@ -1384,8 +1469,9 @@ class Panel {
     this.toast(`${b.assert}: only vacuous attempts`);
   }
   // a A: the next / previous drawn binding, in the panel's order
-  stepAssert(dir) {
-    const bs = this.drawn(); if (!bs.length) { this.toast('no assertion on the waves'); return; }
+  stepAssert(dir) {   // (a search: its matches only)
+    const all = this.drawn(), bs = this.qOn() ? all.filter(b => this.qOk(b)) : all;
+    if (!bs.length) { this.toast(all.length ? `no assertion on the waves matches ${this.Q.text}` : 'no assertion on the waves'); return; }
     const k = this.selA ? bs.indexOf(this.selA.b) : this.cur ? bs.indexOf(this.cur) : -1;
     const b = bs[k < 0 ? (dir > 0 ? 0 : bs.length - 1) : (k + dir + bs.length) % bs.length];
     if (this.selA && this.selA.b === b) this.selA = null;
@@ -1629,19 +1715,23 @@ class Panel {
   }
   // one binding's line in place (status, counts); the whole list only when it changes
   renderB(b) {
+    if (this.qOn() && this.Q.needs) { this.qLater(); return; }   // a search by states: what it lists may change with them
     const el = this.el.querySelector(`ol.asv [data-b="${this.bindings.indexOf(b)}"]`);
     if (el) el.innerHTML = this.bindHTML(b); else this.render();
   }
   render() {
-    const list = [...LIB.byLabel.values()].filter(x => !this.hidden.has(x.a.label) && (!x.file.owners || x.file.owners.has(this.v.M.src))), el = this.el;
-    const orphans = this.bindings.filter(b => !LIB.byLabel.has(b.assert));
-    el.hidden = !list.length && !LIB.notes.length && !orphans.length;
+    const all = this.qAll(), el = this.el;
+    const orphans = this.bindings.filter(b => !LIB.byLabel.has(b.assert) && this.qOk(b));
+    el.hidden = !all.length && !LIB.notes.length && !this.bindings.some(b => !LIB.byLabel.has(b.assert));
     if (el.hidden) { el.innerHTML = ''; return; }
-    const ol = el.querySelector('ol.asv'), keep = ol ? { top: ol.scrollTop, h: ol.style.height } : null;
+    const ol = el.querySelector('ol.asv'), keep = ol ? { top: ol.scrollTop, h: ol.style.height } : null, qf = this.qFocus();
+    const list = this.qOn() ? all.filter(x => this.qShown(x.a)) : all, num = new Map(all.map((x, k) => [x, k + 1]));   // (numbered as in the whole list)
     // a table, two lines per assertion: #, its name, the instance it is bound to, its buttons; under them its kind and
-    // property, the results, the binding's buttons. Several bindings: one line each under it (instance, results, buttons)
-    const line = ({ a, file }, k) => {
-      const bs = this.bindings.filter(b => b.assert === a.label), sigs = a.signals.map(s => s.name);
+    // property, the results, the binding's buttons. Several bindings: one line each under it (instance, results, buttons);
+    // a search lists the bindings it matches
+    const line = (x) => {
+      const { a, file } = x, k = num.get(x) - 1, sigs = a.signals.map(s => s.name);
+      const bs = this.bindings.filter(b => b.assert === a.label && this.qOk(b));
       const pick = this.pick === a.label ? this.pickHTML(a) : '';
       return `<li data-a="${esc(a.label)}" draggable="true"
         title="click: go to it on the waves (again: its next attempt) · drag onto a module in the names column to bind it">
@@ -1655,7 +1745,8 @@ class Panel {
             `\nsignals (the clock first): ${esc(sigs.join(' '))}` +
             `">${propParts(a.text || '').map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code></span>
         ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : `<span
-          class="b1"><span class="st bp">${bs.length ? `${bs.length} bindings ↓` : 'unbound'}</span></span>`}
+          class="b1"><span class="st bp">${bs.length ? `${bs.length}${bs.length < this.bindings.filter(b => b.assert === a.label).length ?
+            ` of ${this.bindings.filter(b => b.assert === a.label).length}` : ''} bindings ↓` : 'unbound'}</span></span>`}
         <span class="ab"><button type="button" data-sv="bind" title="Bind to an instance: the modules where all its signals are">Bind…</button><button
           type="button" class="ic" data-sv="edit" aria-label="edit ${esc(a.label)}"
             title="Edit this assertion here: Apply parses it and evaluates its bindings again (ctrl+Enter)"${a.at ? '' : ' disabled'}>✎</button><button
@@ -1670,10 +1761,10 @@ class Panel {
     };
     el.innerHTML = `<div class="nh"><button type="button" class="tw" data-sv="tw" aria-expanded="${this.open}"
       aria-label="${this.open ? 'fold' : 'open'} the assertions">${this.open ? '▾' : '▸'} <b>Assertions</b></button><span
-        class="muted">${list.length} loaded${this.v.S.svaShow != null ? ` · ${this.drawn().length} shown on the waves` : ''}` +
+        class="muted">${all.length} loaded${this.v.S.svaShow != null || this.qMask() ? ` · ${this.drawn().length} shown on the waves` : ''}` +
           ` · click a line to go to it on the waves` +
           ` · drag a line onto a module in the names to bind it, or Bind…` +
-          ` · kept in this browser</span>
+          ` · kept in this browser</span><span class="svqh"></span>
       <button type="button" data-sv="watch" aria-pressed="${!!LIB.watching}"
         title="Watch the files read with ⟳: when one changes on the disk it is read, parsed and evaluated again` +
           ` (every second)${G.showOpenFilePicker ? '' : '; this browser cannot keep a file to watch'}` +
@@ -1684,18 +1775,21 @@ class Panel {
       <span class="svx"><button type="button" data-sv="table" aria-pressed="${!!this.showTable}"
         title="One row per binding: counts, first and last failure, longest attempt, antecedent → consequent latency">Table</button><button type="button"
           data-sv="fails" aria-pressed="${!!this.showFails}" title="Every failed attempt by time; a row selects it on the waves">Failures</button><button
-            type="button" data-sv="xmd" title="Download the report of this view's bindings as Markdown (the tables)">report.md</button><button type="button"
+            type="button" data-sv="xmd" title="Download the report of this view's bindings as Markdown (the tables; every binding, whatever the search ` +
+              `lists)">report.md</button><button type="button"
               data-sv="xjson" title="Download the results of this view's bindings with the page's meta` +
-                ` (sva report reads it)">report.json</button></span></div>` +
+                ` (sva report reads it; every binding, whatever the search lists)">report.json</button></span></div>` +
       (this.open ? `<div class="svr" aria-live="polite"></div><div class="svw"${this.why ? '' : ' hidden'}>${this.why || ''}</div>` + (LIB.notes.length ?
         `<ul class="svn">${LIB.notes.map(n => `<li class="${n.err ? 'err' : 'warn'}">${esc(n.text)}</li>`).join('')}</ul>` : '') +
       (`<ol class="asv"><li class="hd" aria-hidden="true"><span>#</span><span>Assertion · property</span><span>Bound to · ` +
-          `results</span><span></span></li>${list.map(line).join('')}</ol>`) +
+          `results</span><span></span></li>${list.map(line).join('')}${this.qOn() && !list.length ? `<li class="svq0 muted">${esc(this.qNone())}</li>` :
+            ''}</ol>`) +
       (orphans.length ?
         (`<ul ` +
           `class="svn">${orphans.map(b => `<li
             class="warn">bind: no assertion '${esc(b.assert)}' is loaded (${esc(this.label(b.scope))})</li>`).join('')}</ul>`) : '') +
       `<textarea class="json" readonly${this.jsonOpen ? '' : ' hidden'} aria-label="assertion bindings as JSON"></textarea>` : '');
+    this.qPut(qf);
     const nol = el.querySelector('ol.asv');
     if (nol && keep) { nol.style.height = keep.h; nol.scrollTop = keep.top; }
     if (this.jsonOpen) this.fillJSON();
@@ -1744,7 +1838,9 @@ class Panel {
       bad = bs.filter(b => b.error).length;
     const not = [cannot && `${cannot} cannot bind`, bad && `${bad} error${bad === 1 ? '' : 's'}`].filter(Boolean).join(', ');
     let tot = `${loaded} loaded · ${ev} bound${not ? ` (${not})` : ''}`;
-    if (v.S.svaShow != null) tot += ` · ${this.drawn().length} shown on the waves (svaShow)`;   // the totals stay over every binding
+    if (this.qMask()) tot += ` · ${this.drawn().length} shown on the waves (Mask)`;
+    else if (v.S.svaShow != null) tot += ` · ${this.drawn().length} shown on the waves (svaShow)`;   // the totals stay over every binding
+    if (this.qOn()) tot = `<b class="svqt">${esc(this.qCount())}</b> · ` + tot;   // the search: how many it lists (the table and failures: its)
     const t = r && r.summary.assertions.length ? r.summary.totals : null;
     if (t) tot += (` · <b class="${t.with_failures ? 'c-fail' : ''}">${t.with_failures} with failures</b> · ${t.attempts} attempts: ${t.pass} pass, <span ` +
         `class="c-fail${t.fail ? '' : ' zero'}">${t.fail} fail</span>, ${t.vacuous} ` +
@@ -1752,7 +1848,7 @@ class Panel {
           `${t.active ? `, ${t.active} active` : ''}${t.capped ? `, ${t.capped} capped (no verdict)` : ''}` +
           `${t.covers ? ` · ${t.covered} of ${t.covers} covers hit` : ''}`);
     el.querySelector(':scope > .tot').innerHTML = tot;
-    const rows = t ? r.summary.assertions : [];
+    const rows = t ? r.summary.assertions : [], hit = k => this.qOk(r.bs[k]);
     const bi = k => bs.indexOf(r.bs[k]);
     // the attempt of a failure by its start: one map per binding, made when asked
     const at = new Map(), att = (k, start) => {
@@ -1767,7 +1863,8 @@ class Panel {
         const go = (k, e) => e ?
           (`<button type="button" class="lnk" data-sv="go" data-b="${bi(k)}" data-i="${att(k, e.start)}" ` +
             `title="${esc(e.note)}">${esc(e.time_fail || '')}</button>`) : '—';
-        const notes = rows.flatMap(a => (a.notes || []).map(n => `<li class="warn"><code>${esc(a.name)}</code> ${esc(this.label(a.scope))}: ${esc(n)}</li>`));
+        const notes = rows.flatMap((a, k) => (hit(k) ? a.notes || [] : []).map(n =>
+          `<li class="warn"><code>${esc(a.name)}</code> ${esc(this.label(a.scope))}: ${esc(n)}</li>`));
         box.innerHTML =
           (`<div class="twr"><table ` +
             `class="svt"><thead><tr><th>Assertion</th><th>Scope</th><th>Attempts</th><th>Pass</th><th>Fail</th>` +
@@ -1775,6 +1872,7 @@ class Panel {
               `<th>First failure</th><th>Last failure</th><th>Longest</th>` +
               `<th title="antecedent → consequent, cycles, passing attempts">Latency min / avg / max</th></tr></thead><tbody>`) +
           rows.map((a, k) => {
+            if (!hit(k)) return '';
             const s = a.stats, b = r.bs[k], cover = a.kind === 'cover', num = key => s[key] &&
               key !== 'vacuous' ? `<button type="button" class="cnum${b.only === key ? ' on' : ''}" data-sv="only" data-k="${key}">${s[key]}</button>` :
               String(s[key] ?? 0);
@@ -1791,7 +1889,7 @@ class Panel {
     if (which !== 'table') {
       const box = el.querySelector(':scope > .svx-f');
       if (!this.showFails || !t) { box.innerHTML = ''; return; }
-      const fs = r.summary.failures, names = [...new Set(fs.map(f => f.name))], keep = this.failFilter || '';
+      const fs = r.summary.failures.filter(f => hit(f.row)), names = [...new Set(fs.map(f => f.name))], keep = this.failFilter || '';
       const shown = keep ? fs.filter(f => f.name === keep) : fs, max = Panel.MAX_FAILS, list = shown.slice(0, max);
       box.innerHTML = `<div class="svf"><b>Failures</b> <span
         class="muted">${shown.length}${keep ? ` of ${fs.length}` : ''}, by the time they were found · a row selects the attempt</span>
@@ -1814,7 +1912,7 @@ class Panel {
     }
   }
   failText() {
-    const fs = (this.sum ? this.sum.summary.failures : []).filter(f => !this.failFilter || f.name === this.failFilter);
+    const fs = (this.sum ? this.sum.summary.failures : []).filter(f => (!this.failFilter || f.name === this.failFilter) && this.qOk(this.sum.bs[f.row]));
     return ['assertion\tscope\tfailed at\tstart\treason\tnote', ...fs.map(f => [f.name, f.scope || '(top)', `${f.time_fail} (cycle ${f.failed_at})`,
       `${f.time} (cycle ${f.start})`, f.kind, f.note].join('\t'))].join('\n');
   }
@@ -1849,7 +1947,8 @@ class Panel {
       if (e.target.closest('b.sp, code.at') && String(G.getSelection && G.getSelection()).length) return;   // text selected to copy
       const li = e.target.closest('ol.asv li[data-a]'), one = e.target.closest('ul.bnd li[data-b]');
       if (!li) return;
-      const b = one ? this.bindings[+one.dataset.b] : this.bindings.find(x => x.assert === li.dataset.a && outcome(x) && this.drawn().includes(x)) ||
+      const b = one ? this.bindings[+one.dataset.b] : this.bindings.find(x => x.assert === li.dataset.a && this.qOk(x) && outcome(x) &&
+        this.drawn().includes(x)) ||
         this.bindings.find(x => x.assert === li.dataset.a);
       if (b) this.reveal(b); else this.toast(`${li.dataset.a} is not bound: drag it onto a module, or Bind…`);
       return;
@@ -1957,6 +2056,114 @@ function clearAll() {
 Panel.WHY_CYCLES = 64;   // columns of Why at most (a longer attempt: its first cycles)
 Panel.MAX_FAILS = 500;   // rows of the Failures list (the rest: the filter, report.md, report.json)
 SVA.panels = () => [...LIB.panels];
+
+/* ---------------- the panel's search: its field ⌕ and Mask (svaQuery), kept in this browser and in the state ---------------- */
+const QUERY_TIP = 'Find assertions: every word holds, a,b one of them, !word not; * ? mask the whole (else a part of it), any case · ' +
+  'apb_*: the label · @PREADY, @*.u_apb.p*: a signal, by its name in the source or its full path · in:*.u_dma*: the instance · ' +
+  'is:fail pass vacuous cover assert assume unbound error capped running · the list, Table and Failures show what it finds, Mask the waves too; ' +
+  'Enter, ]a [a walk them; / in the panel: here, Esc: empty';
+Object.assign(Panel.prototype, {
+  // the field, Mask and what they say: one element over every render (typing keeps its place); the query this browser
+  // keeps, else the setting svaFilter ({query, mask} or a query)
+  qInit() {
+    const v = this.v;
+    this.q = filterOf(store.get(this.key + ':filter')) || filterOf(v.S.svaFilter) || { query: '', mask: false }; this.Q = svaQuery(this.q.query);
+    const box = this.qBox = document.createElement('span'); box.className = 'svq';
+    box.innerHTML = (`<input type="search" class="svqf" spellcheck="false" autocomplete="off" placeholder="name* @signal in:scope is:fail" ` +
+      `aria-label="find assertions" title="${esc(QUERY_TIP)}"><button type="button" data-sv="qmask" aria-pressed="false" ` +
+      'title="Mask: on the waves only the assertions found (over svaShow); ]a [a walk them either way">Mask</button>' +
+      '<span class="svqn" aria-live="polite"></span><span class="svqe" role="alert"></span>');
+    this.qEl = box.querySelector('input'); this.qEl.value = this.q.query;
+    this.qEl.addEventListener('input', () => this.setFilter({ query: this.qEl.value }, { typed: true }));
+    this.qEl.addEventListener('keydown', e => {   // Esc: empty (empty: out of it); Enter: the next match on the waves (]a), shift: the previous
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (this.qEl.value) this.setFilter({ query: '' }); else this.qEl.blur(); }
+      else if (e.key === 'Enter') { e.preventDefault(); this.stepAssert(e.shiftKey ? -1 : 1); }
+    });
+    box.addEventListener('click', e => { if (e.target.closest('[data-sv=qmask]')) this.setFilter({ mask: !this.q.mask }); });
+    this.el.addEventListener('keydown', e => {   // "/" in the panel (not in a field): the search
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea, select')) return;
+      e.preventDefault(); this.qEl.focus(); this.qEl.select();
+    });
+    if (v.extraState) v.extraState.push({ key: 'svaFilter', get: () => this.qState(), set: x => this.setFilter(filterOf(x) || { query: '', mask: false }) });
+  },
+  qState() { return this.q.query || this.q.mask ? { query: this.q.query, mask: this.q.mask } : null; },
+  // o: {query?, mask?}; typed: from the field (its text as typed, the waves after a pause)
+  setFilter(o, opt = {}) {
+    const was = this.qMask(), q = { query: o.query !== undefined ? String(o.query == null ? '' : o.query).trim() : this.q.query,
+      mask: o.mask !== undefined ? !!o.mask : this.q.mask };
+    this.q = q; this.Q = svaQuery(q.query);
+    if (!opt.typed && this.qEl.value.trim() !== q.query) this.qEl.value = q.query;
+    store.set(this.key + ':filter', this.qState());
+    this.render();
+    if (!was && !this.qMask()) { this.jumps(); return; }   // the waves as they were
+    clearTimeout(this.qT);
+    const go = () => { if (this.selA && !this.drawn().includes(this.selA.b)) this.dropSel(); this.redraw(); };
+    if (opt.typed) this.qT = setTimeout(go, 150); else go();
+  },
+  qOn() { return !!this.Q && this.Q.terms.length > 0; },   // (none before qInit)
+  qMask() { return this.qOn() && this.q.mask ? this.Q : null; },
+  itemOf(b) { const x = LIB.byLabel.get(b.assert); return queryItem(x && x.a, b); },
+  qOk(b) { return !b || !this.qOn() || queryMatch(this.Q, this.itemOf(b)); },
+  // an assertion of the list is listed: one of its bindings matches; bound nowhere: it does
+  qShown(a) {
+    const bs = this.bindings.filter(b => b.assert === a.label); return bs.length ? bs.some(b => this.qOk(b)) : queryMatch(this.Q, queryItem(a, null)); },
+  qAll() { return [...LIB.byLabel.values()].filter(x => !this.hidden.has(x.a.label) && (!x.file.owners || x.file.owners.has(this.v.M.src))); },
+  // bindings a search by results cannot judge yet (being evaluated, or not yet)
+  qPending() {
+    return this.qOn() && this.Q.needs ? this.bindings.filter(b => b.running || ((!b.state || b.state === 'bound') && !outcome(b) && !b.error)).length : 0;
+  },
+  qCount() {
+    const all = this.qAll(), n = all.filter(x => this.qShown(x.a)).length, p = this.qPending(), nb = this.bindings.filter(b => this.qOk(b)).length;
+    if (!n && p) return `still evaluating (${p} binding${p === 1 ? '' : 's'} without results yet)`;
+    return `${n} of ${all.length} match${nb && nb !== n ? ` (${nb} binding${nb === 1 ? '' : 's'})` : ''}${p ? ` · still evaluating ${p}` : ''}`;
+  },
+  qNone() { const p = this.qPending();
+    return p ? `still evaluating: ${p} binding${p === 1 ? '' : 's'} without results yet` : `no assertion matches ${this.Q.text}`; },
+  qShow() {
+    const b = this.qBox; if (!b) return;
+    b.querySelector('[data-sv=qmask]').setAttribute('aria-pressed', !!this.q.mask);
+    b.querySelector('.svqn').textContent = this.qOn() ? this.qCount() : '';
+    const n = this.Q.errors.length;
+    b.querySelector('.svqe').textContent = n ? `${this.Q.errors.join(' · ')} — not filtered by ${n === 1 ? 'it' : 'them'}` : '';
+  },
+  // render: the field's focus and selection before, the field in its place after
+  qFocus() { const f = this.qEl; return f && f.isConnected && document.activeElement === f ? [f.selectionStart, f.selectionEnd] : null; },
+  qPut(f) {
+    const h = this.el.querySelector('.svqh'); if (h && this.qBox) h.replaceWith(this.qBox);
+    if (f) { this.qEl.focus({ preventScroll: true }); try { this.qEl.setSelectionRange(f[0], f[1]); } catch (e) { /* a search field may not */ } }
+    this.qShow();
+  },
+  qLater() { if (this.qQ) return; this.qQ = true; queueMicrotask(() => { this.qQ = false; this.render(); }); },
+  // the names' menu: Assertions on this signal
+  onSignal(full) {
+    this.open = true; this.setFilter({ query: '@' + full });
+    this.el.scrollIntoView({ block: 'nearest' }); this.qEl.focus({ preventScroll: true });
+    this.toast(`@${full}: ${this.qCount()}`);
+  },
+  // a binding's (or an assertion's, bound nowhere) line of the command sva
+  qEntry(a, b) {
+    const o = b && outcome(b), is = queryIs(a, b), sig = b ? Object.assign({}, (o && o.signals) || {},
+      Object.fromEntries(Object.entries((b.res && b.res.map) || {}).map(([n, r]) => [n, r.full]))) :
+      Object.fromEntries((a ? a.signals : []).map(s => [s.name, null]));
+    const state = !b ? 'unbound' : b.running ? 'running' : is.has('error') ? 'error' : o ? ['fail', 'pass', 'vacuous'].find(w => is.has(w)) : 'pending';
+    return { assert: a ? a.label : b.assert, scope: b ? b.scope || '' : null, signals: sig, state, counts: o ? Object.assign({}, o.stats) : null };
+  },
+  // the command sva: {filter?, mask?} set (checked by the command), -> what it finds now
+  command(a) {
+    if (a.filter !== undefined || a.mask !== undefined) this.setFilter({ ...(a.filter !== undefined ? { query: a.filter } : {}), ...(a.mask !== undefined ?
+      { mask: a.mask } : {}) });
+    const out = [];
+    for (const { a: x } of this.qAll()) {
+      const bs = this.bindings.filter(b => b.assert === x.label);
+      if (!bs.length) { if (!this.qOn() || queryMatch(this.Q, queryItem(x, null))) out.push(this.qEntry(x, null)); }
+      else for (const b of bs) if (this.qOk(b)) out.push(this.qEntry(x, b));
+    }
+    for (const b of this.bindings) if (!LIB.byLabel.has(b.assert) && this.qOk(b)) out.push(this.qEntry(null, b));
+    const p = this.qPending();
+    return { filter: this.q.query, mask: this.q.mask, errors: this.Q.errors.slice(), count: out.length, matches: out, ...(p ? { evaluating: p } : {}),
+      drawn: this.drawn().length };
+  },
+});
 
 /* ---------------- expressions: virtual signals and search (stage 10) ---------------- */
 // An expression of the waves ("PSEL && !PREADY", "@(posedge PCLK) $rose(req)") is parsed and valued by the engine
@@ -2648,11 +2855,11 @@ function svgRows(M, S) {
     exprs: exprs.map(exprNorm).filter(e => e.text) });
   if (!k.wait && G.WAVELENS_SVA_WASM && k.binds.some(b => !b.results)) k.wait = svgEvaluate(M, S, k);
   if (!k.xwait && G.WAVELENS_SVA_WASM && k.exprs.length) k.xwait = svgExprs(M, S, k);
-  const ok = shown(S), I = scopeInfo(M), at = new Map([[-1, exprRows(k.xst, k.exprs.filter(e => e.res && !e.res.err))]]);
+  const ok = drawnOf(S, filterOf(S.svaFilter)), I = scopeInfo(M), at = new Map([[-1, exprRows(k.xst, k.exprs.filter(e => e.res && !e.res.err))]]);
   for (const b of k.binds) {
-    const o = outcome(b);
-    if (!o || !ok(b.assert) || (o.missing || []).length) continue;
-    const g = I.group(b.scope), key = g ? g.id : -1, map = rowsOf(M, o);
+    const o = outcome(b), map = o && rowsOf(M, o), x = LIB.byLabel.get(b.assert);
+    if (!o || (ok && !ok(queryItem(x && x.a, b, map))) || (o.missing || []).length) continue;
+    const g = I.group(b.scope), key = g ? g.id : -1;
     const copies = S.svaSignals === true ? [...new Set(Object.values(map))] : [];
     const rows = assertionRows(b.draw, b.results, { S, label: b.assert, scope: b.scope, copies, map, view: null, focus: focusOf(o),
       base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 }, sel: () => -1, pick: () => {} });
@@ -2695,7 +2902,8 @@ function svgEvaluate(M, S, k) {
 function start() {
   if (!G.WaveLens || !G.WaveLens.plugin) return;
   // the settings of this plugin (wavelens.config.js lists them): the list open at start, which groups, the signals again
-  if (G.WaveLens.registerDefaults) G.WaveLens.registerDefaults({ svaOpen: false, svaShow: null, svaSignals: 'view', exprsOpen: false });
+  if (G.WaveLens.registerDefaults) G.WaveLens.registerDefaults({ svaOpen: false, svaShow: null, svaFilter: null, svaSignals: 'view',
+    exprsOpen: false });
   G.WaveLens.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active',
     'sva-capped': '--sva-capped' });
   localFiles();

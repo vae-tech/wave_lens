@@ -24,6 +24,9 @@ function cmdTime(v, x, what = 't') {
   if (t == null || !isFinite(t)) fail(`${what}: "${x}" is not a time (a number in ${v.M.timed ? 'ps' : 'cycles'}, or "250ns")`);
   return t;
 }
+// a text of a command (a label, a bookmark's text): String() of it (a list "1,2"), not an object (M-08: "[object Object]"); null: none
+const cmdStr = (x, what) => { if (x == null) return ''; if (typeof x === 'object' && !Array.isArray(x)) fail(`${what}: a text, not ${JSON.stringify(x)}`);
+  return String(x); };
 // a time something is put at (a bookmark, a marker, a span's end): inside the waves (from 0 when they start later: a test's mark at its start)
 function cmdIn(v, x, what = 't') {
   const t = cmdTime(v, x, what), lo = Math.min(0, v.M.t0);
@@ -141,8 +144,8 @@ command('bookmark', 'n? t? signal? text? label? color? lift? top? link? go? dele
     v.bms.push(b); }
   if (t != null) { b.t = t; delete b.at; }   // the event its time came from (mkhtml.py) no longer says it
   if (a.signal !== undefined) b.signal = sig;
-  if (a.text !== undefined) b.text = a.text == null ? '' : String(a.text);
-  if (a.label !== undefined) b.label = a.label == null ? '' : String(a.label);
+  if (a.text !== undefined) b.text = cmdStr(a.text, 'text');
+  if (a.label !== undefined) b.label = cmdStr(a.label, 'label');
   if (a.color !== undefined) b.color = cmdColor(a);
   if (a.lift !== undefined) b.lift = liftOf(a.lift);
   if (a.top !== undefined) b.top = top;
@@ -174,7 +177,7 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   const x = v.arrows[i]; x.from = from; x.to = to;
   for (const k of ['shape', 'head', 'line']) if (a[k] != null) x[k] = a[k];
   if (a.color !== undefined) x.color = cmdColor(a);
-  if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
+  if (a.label !== undefined) x.label = cmdStr(a.label, 'label');
   v.changed(true); return { id: i + 1 };
 });
 // dmin over dmax of one kind (two times, or two counts of cycles): a bound no Δ keeps, refused
@@ -205,7 +208,7 @@ command('marker', 'id? t? label? color? signal? lift? hidden? dmin? dmax? delete
   boundsOk(bd, a, [m || {}]);
   if (!m) { m = { t: v.cursor, label: '', color: null, signal: null, lift: false }; v.umarks.push(m); }
   if (t != null) m.t = t;
-  if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
+  if (a.label !== undefined) m.label = cmdStr(a.label, 'label');
   if (a.color !== undefined) m.color = cmdColor(a);
   if (a.signal !== undefined) m.signal = sig;
   if (a.lift != null) m.lift = a.lift;
@@ -323,7 +326,8 @@ command('expr_markers', 'id? label? color? signal? limit? deltas? delete?', 'a m
   for (const id of gone) { v.umarks.splice(id - 1, 1); markGone(v.umarks, id); }
   if (a.delete) { v.setMarks(); return { id: x.id, deleted: gone.length }; }
   const from = v.t0, to = v.t0 + v.span, S = x.spans.map(p => p[0]).filter(t => t >= from && t <= to), n = Math.min(S.length, +(a.limit ?? EXPR_MARKERS));
-  const base = a.label != null ? String(a.label) : x.label || `ƒ${x.id}`, color = a.color !== undefined ? a.color || null : x.color, k0 = v.umarks.length;
+  const base = a.label != null ? cmdStr(a.label, 'label') : x.label || `ƒ${x.id}`;
+  const color = a.color !== undefined ? a.color || null : x.color, k0 = v.umarks.length;
   v.umarks.push(...markNorm(S.slice(0, n).map((t, k) => ({ t, label: `${base} ${k + 1}`, color, signal: sig, dto: k + 1 < n ? k0 + k + 2 : 0,
     expr: x.text }))));
   if (n && a.deltas !== false) { v.deltas = true; v.saveRows(); }
@@ -331,29 +335,54 @@ command('expr_markers', 'id? label? color? signal? limit? deltas? delete?', 'a m
   if (S.length > n) v.toast(`${n} of ${S.length} matches: narrow the window for the others`);
   return { id: x.id, markers: n, more: S.length - n, from, to };
 });
-command('compare', 'result? dump? a? map? offset? off? show? mask?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
-  'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
-  'show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over each other where they differ), alone or with result; ' +
-  'mask: the red bands on (true, the setting compareMask) or off (d then flips between the two runs alone)',
+// the Assertions panel's search (wavelens/sva.js): its query and Mask, kept in the state as svaFilter (tools/viewedit.py writes
+// the same into a page's file; what it finds is the page's)
+const svaPanel = v => v.sva || fail('assertions need sva.js in the page (no mkhtml.py --no-sva)');
+command('sva', 'filter? mask?', 'the Assertions panel\'s search: filter a text (name* @signal in:scope is:fail …; "" or null: none), mask: the waves ' +
+  'draw only what it finds (over svaShow) -> {filter, mask, errors (terms not understood: nothing filtered by them), count, matches: [{assert, scope, ' +
+  'signals: {name: full path}, state, counts}], evaluating (bindings a filter by results cannot judge yet), drawn (assertion groups on the waves)}',
+(v, a) => {
+  if (a.filter != null && typeof a.filter !== 'string') fail(`sva: filter is a text (name* @signal in:scope is:fail), not ${JSON.stringify(a.filter)}`);
+  if (a.mask != null && typeof a.mask !== 'boolean') fail('sva: mask: true or false');
+  return svaPanel(v).command(a);
+});
+command('compare', 'result? dump? a? map? offset? off? show? mask? from? to? go?', 'a second dump over these waves, where its values differ (red bands, ≠, ' +
+  ']d [d): result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump, over from … to when given); off: compared ' +
+  'no more, nothing picked; go: Compare as the bar\'s (g=) — B picked, or the compare on the waves made again, over the window in sight (from … to: ' +
+  'the waves zoomed there first); show: which run the waves show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over ' +
+  'each other where they differ), alone or with result; mask: the red bands on (true, the setting compareMask) or off (d then flips between the two ' +
+  'runs alone). It answers the window compared (from, to)',
 async (v, a) => {
-  if (a.off) { v.compareResult(null); return { off: true }; }
   if (a.mask != null && typeof a.mask !== 'boolean') fail('mask: true or false');
-  if (a.mask != null) { v.compareMask(a.mask, true); if (a.result == null && a.show == null && a.dump == null) return { mask: v.cmpMask }; }
+  if (a.off && a.mask != null) v.compareMask(a.mask, true);   // with off: the setting kept for the next compare (M-07: not ignored)
+  if (a.off) { v.compareOff(); return { off: true }; }   // the bar's ✕: the picks go too (review 2026-11-18 M-03)
+  const said = r => ({ name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing, from: r.from, to: r.to });
+  if (a.mask != null) { v.compareMask(a.mask, true); if (a.result == null && a.show == null && a.dump == null && !a.go) return { mask: v.cmpMask }; }
+  if (a.show != null && !CMP_SHOWS.includes(a.show)) fail(`compare: show is ${CMP_SHOWS.join(', ')}, not "${a.show}"`);
+  if (a.go) {   // the bar's Compare (M-03): what it says when it does not compare is the error
+    if (a.result != null || a.dump != null) fail('compare go: Compare of what is picked, not with result or dump');
+    if ((a.from == null) !== (a.to == null)) fail('compare go: from and to, or neither (the window in sight)');
+    if (a.from != null) { const p = cmdTime(v, a.from, 'from'), q = cmdTime(v, a.to, 'to');
+      if (!(q > p)) fail('compare go: "to" is not after "from"'); v.zoomTo(p, q); }
+    const r = await v.compareGo();
+    if (!r) { const t = v.root.querySelector('.bar .toast'); fail((t && t.textContent) || 'compare go: nothing compared'); }
+    return Object.assign(said(r), a.show != null ? { show: await v.compareView(a.show, true) } : {});
+  }
+  if (a.from != null || a.to != null) fail('compare: from and to are of go (here) or of dump (tools/viewedit.py, view_edit)');
   const shown = async () => {
     const no = v.cmpCant(a.show); if (no) fail(no);
     await v.compareView(a.show, true); return v.cmpRun;
   };
-  if (a.show != null && !CMP_SHOWS.includes(a.show)) fail(`compare: show is ${CMP_SHOWS.join(', ')}, not "${a.show}"`);
   if (a.result != null) {
     const r = v.compareResult(a.result, true);
     if (!r) fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves');
-    return Object.assign({ name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing },
-      a.show != null ? { show: await shown() } : {});
+    v.cmpPk = { a: null, b: null }; v.cmpShow();   // B given: nothing picked is left over it (M-03)
+    return Object.assign(said(r), a.show != null ? { show: await shown() } : {});
   }
   if (a.show != null && a.dump == null) return { show: await shown(), name: v.cmp.name };
   if (a.dump != null) fail('compare dump: a page reads no file by itself: pick it with Compare… here; an agent gives result (view_edit makes it of dump ' +
     'on the page\'s file, or live)');
-  fail('compare: result, show, mask or off');
+  fail('compare: result, go, show, mask or off');
 });
 command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
   'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
@@ -374,7 +403,7 @@ command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stre
   if (from != null) s.from = from;
   if (to != null) s.to = to;
   if (s.from > s.to) [s.from, s.to] = [s.to, s.from];
-  if (a.label !== undefined) s.label = a.label == null ? '' : String(a.label);
+  if (a.label !== undefined) s.label = cmdStr(a.label, 'label');
   if (a.color !== undefined) s.color = cmdColor(a);
   if (sigs !== undefined) s.signals = sigs.length ? sigs : null;
   v.changed(true); return { id: v.spans.indexOf(s) + 1 };
@@ -389,6 +418,8 @@ command('group', 'name signals? add? remove? color? rename? delete? go? move? di
     v.setGroups(); return { name, deleted: true }; }   // hidden: a new group of that name is shown
   const fulls = spec => sigsOf(v, pickRows(v, spec, { groups: true })).map(r => r.full);
   const set = a.signals != null ? fulls(a.signals) : null, add = a.add != null ? fulls(a.add) : [], rm = a.remove != null ? fulls(a.remove) : [];
+  if (a.rename != null && typeof a.rename !== 'string') fail('rename: a name (a text)');
+  if (a.rename != null && !g) fail(`no group "${name}" to rename`);
   const to = a.rename != null ? String(a.rename).trim() : null;
   if (to === '' || (to && to !== name && v.ugroups.some(x => x.name === to))) fail(`rename: ${to ? `a group "${to}" is there` : 'a name'}`);
   const mv = a.move;
@@ -566,26 +597,69 @@ command('bits', 'signals on?', 'buses shown bit by bit, a row per bit under each
   const rows = pickRows(v, a.signals), bad = rows.filter(r => !isVec(r)); if (bad.length) fail(`not a bus: ${bad.map(r => r.full).join(', ')}`);
   v.setBits(rows, a.on ?? true); return { signals: rows.length };
 });
-command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore: prefixes left out when comparing ("i_,o_")', (v, a) => {
+command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore: prefixes left out when comparing ("i_,o_"); another sort ' +
+  'drops your order (order), orderDropped: the modules it had', (v, a) => {
   if (!SORTS.includes(a.dir)) fail(`dir: one of ${SORTS.join(' ')}`);
-  v.setSort(a.dir, a.ignore ?? undefined); return { sort: v.sort, ignore: v.sortIgnore };
+  const n = v.setSort(a.dir, a.ignore ?? undefined, { quiet: true }).orderDropped;
+  return { sort: v.sort, ignore: v.sortIgnore, ...(n ? { orderDropped: n } : {}) };
+});
+// the row of the dump the command order names: as pickRows; two rows of one path (a signal and a module "sub", two "valid" of a
+// WaveJSON group) told apart as your order does, "top.sub#2" the second
+function ownPick(v, spec) {
+  const at = (full, n) => v.M.rows.filter(r => r.type !== 'space' && r.full === full)[n - 1];
+  let hit; try { hit = pickRows(v, spec, { groups: true }); } catch (e) {
+    const m = /^(.*)#(\d+)$/.exec(spec), r = m && at(m[1], +m[2]); if (r) return r; throw e; }
+  const fulls = [...new Set(hit.map(r => r.full))];
+  if (fulls.length !== 1) fail(`one signal or module, not ${fulls.length} (${fulls.slice(0, 4).join(', ')})`);
+  const same = v.M.rows.filter(r => r.type !== 'space' && r.full === fulls[0]);
+  const kind = r => (r.type === 'group' ? 'a module' : 'a signal');
+  if (same.length > 1) fail(`two rows "${fulls[0]}" (${same.map(kind).join(', ')}): the second is "${fulls[0]}#2"`);
+  return hit[0];
+}
+command('order', 'signal? move? module? clear?', 'your order of the dump\'s rows (alt+↑ ↓ in the names; the state\'s "order"): signal (a signal or ' +
+  'a module of the dump) moved among the rows of its module shown, up, down, top, bottom or a number (1: the first); module: true moves the ' +
+  'module it is in; clear: true all of your order, or with signal its module\'s', (v, a) => {
+  const mv = a.move;
+  if (mv != null && !['up', 'down', 'top', 'bottom'].includes(mv) && !(Number.isInteger(mv) && mv >= 1)) {
+    fail('move: up, down, top, bottom or a number (1: the first)'); }
+  if (a.module != null && typeof a.module !== 'boolean') fail('module: true or false');
+  if (a.clear != null && typeof a.clear !== 'boolean') fail('clear: true or false');
+  const place = r => { const P = v.ownPlace(r), tag = ownKeys(v.M.rows).get(r).slice(r.name.length);   // a second row of its name: "#2"
+    return { signal: r.full + tag, module: P.path, at: P.i + 1, of: P.n }; };
+  let r = a.signal != null ? ownPick(v, String(a.signal)) : null;
+  if (r && !v.ownRow(r)) fail(`${r.full}: a row of your groups, a copy or a bit has no place of its own in the dump (group … move for yours)`);
+  if (r && a.module) { const p = r.anc.length && v.M.groups[r.anc[r.anc.length - 1]]; if (!p || !v.ownRow(p)) fail(`${r.full}: at the top, no module`); r = p; }
+  if (a.clear) {
+    if (mv != null) fail('clear or move, not both');
+    const path = r ? v.ownPlace(r).path : null, was = Object.keys(v.order).length;
+    v.order = path == null ? {} : Object.fromEntries(Object.entries(v.order).filter(([p]) => p !== path)); v.orderWas = null;
+    v.rowsStale = true; v.allRows(); v.saveRows(); v.renderNames(); v.draw();
+    return { cleared: was - Object.keys(v.order).length };
+  }
+  if (!r) fail('order: a signal (with move), or clear');
+  if (mv == null) return place(r);
+  const moved = v.moveOwn(mv === 'up' ? -1 : mv === 'down' ? 1 : mv === 'top' ? -Infinity : mv === 'bottom' ? Infinity : 0, false, r,
+    { one: true, quiet: true, ...(Number.isInteger(mv) ? { at: mv } : {}) });
+  return { ...place(r), moved: !!moved };
 });
 command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null: the settings')`, (v, a) => {
   if (a.name != null && !hasKey(EDGES, a.name)) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
 });
-command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?', 'where the rows scroll: window (in the viewer, ' +
+command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt? scrollbar?', 'where the rows scroll: window (in the viewer, ' +
   'height: "80vh", 600) or page (with the page, the bar sticking to the top); tools: fold or open (the bar\'s tools to its title line); compact: ' +
   'the bar\'s short form, auto (a bar narrower than 900 px), true or false; bar: its groups arranged, lines of their labels ([["find", "cursor"], ' +
   '["list"]]; null: the default order); stripGroups: the groups in the strip over the time axis (["find", "cursor"]; []: no strip; null: the ' +
   'default); at: groups placed in their line or the strip, {"marks": 0.5} (0 left .. 1 right, "left", "center", "right"; null: in the flow); ' +
-  'strip, stripAt: 0.53\'s, the cursor and the edges in the strip or not, their place',
+  'strip, stripAt: 0.53\'s, the cursor and the edges in the strip or not, their place; scrollbar: the scroll bar at the foot of the waves ' +
+  '(the setting scrollbar; null: the settings\')',
   (v, a) => {
   if (a.scroll != null && !['window', 'page'].includes(a.scroll)) fail('scroll: window or page');
   if (a.tools != null && !['fold', 'open'].includes(a.tools)) fail('tools: fold or open');
   if (a.compact != null && ![true, false, 'auto'].includes(a.compact)) fail('compact: auto, true or false');
   if (a.bar != null && !toolLines(a.bar)) fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null');
   if (a.strip != null && typeof a.strip !== 'boolean') fail('strip: true or false');
+  if (a.scrollbar != null && typeof a.scrollbar !== 'boolean') fail('scrollbar: true, false or null');
   const placeOk = p => (typeof p === 'number' ? p >= 0 && p <= 1 : hasKey(STRIP_AT, String(p).toLowerCase()));
   if (a.stripAt != null && !placeOk(a.stripAt)) fail('stripAt: 0 .. 1, "left", "center" or "right"');
   if (a.stripGroups != null && !Array.isArray(a.stripGroups)) fail('stripGroups: a list of group labels, ["find", "cursor"], or null');
@@ -603,9 +677,10 @@ command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? 
     v.setToolAt(A, { only: true }); }
   if (a.strip != null) v.setCursorStrip(a.strip, { only: true });
   if (a.stripAt != null) v.setStripAt(a.stripAt, { only: true });
+  if ('scrollbar' in a) v.setScrollbar(a.scrollbar);
   return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open',
     compact: compactOf(v.S.toolsCompact), bar: toolLines(v.S.toolLayout), stripGroups: stripNames(v.S.stripGroups), at: toolAts(v.S.toolAt),
-    strip: v.S.cursorStrip !== false, stripAt: toolAts(v.S.toolAt).cursor ?? stripAt(v.S.cursorStripAt) };
+    strip: v.S.cursorStrip !== false, stripAt: toolAts(v.S.toolAt).cursor ?? stripAt(v.S.cursorStripAt), scrollbar: v.S.scrollbar !== false };
 });
 command('find', 'query case? word? regex? highlight? open? mask?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s ' +
   'buttons',
@@ -738,7 +813,7 @@ Object.assign(WaveView.prototype, {
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
         sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
-        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false },
+        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false, scrollbar: this.S.scrollbar !== false },
         this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
   },
@@ -857,24 +932,28 @@ Object.assign(WaveView.prototype, {
       n: rest.filter(x => shown.has(x)).length + 1 };
   },
   ownRow(r) { return r && (r.type === 'sig' || r.type === 'group') && !r.ug && !r.user && !r.dupOf && r.bit == null && this.M.rows.includes(r); },
-  moveOwn(dir, whole = false, r = this.sel) {
-    if (!this.ownRow(r)) { this.toast('this row has no place of its own to move to (a copy, a bit, a plugin\'s row)'); return false; }
+  // o: {one: true} the row alone (not the selected run it is in), {at: n} to the n-th place of its run (1: the first; the command
+  // order), {quiet: true} no toast
+  moveOwn(dir, whole = false, r = this.sel, o = {}) {
+    const say = m => { if (!o.quiet) this.toast(m); return false; };
+    if (!this.ownRow(r)) return say('this row has no place of its own to move to (a copy, a bit, a plugin\'s row)');
     if (whole) { const p = r.anc.length && this.M.groups[r.anc[r.anc.length - 1]];
-      if (!p || !this.ownRow(p)) { this.toast('at the top: no module to move'); return false; } return this.moveOwn(dir, false, p); }
-    const blk0 = r.type === 'sig' && this.selRun.size > 1 && this.selRun.has(r) ? [...this.selRun] : [r];
+      if (!p || !this.ownRow(p)) return say('at the top: no module to move'); return this.moveOwn(dir, false, p, o); }
+    const blk0 = !o.one && r.type === 'sig' && this.selRun.size > 1 && this.selRun.has(r) ? [...this.selRun] : [r];
     const P0 = this.ownPlace(r), blk = P0.run.filter(x => blk0.includes(x)), P = this.ownPlace(r, blk), rest = P.rest;
     let pos = P.pos;
-    if (dir === -Infinity) pos = 0;
+    if (o.at != null) { let k = 0, j = 0; while (j < rest.length && k < o.at - 1) { if (P.shown.has(rest[j])) k++; j++; } pos = j; }
+    else if (dir === -Infinity) pos = 0;
     else if (dir === Infinity) pos = rest.length;
     else if (dir < 0) { let k = pos - 1; while (k >= 0 && !P.shown.has(rest[k])) k--; if (k < 0) return false; pos = k; }
     else { let k = pos; while (k < rest.length && !P.shown.has(rest[k])) k++; if (k >= rest.length) return false; pos = k + 1; }
     if (pos === P.pos) return false;
     rest.splice(pos, 0, ...blk);
-    const list = P.sib.slice(0, P.a).concat(rest, P.sib.slice(P.b + 1)).filter(x => x.type !== 'space').map(x => x.name);
-    this.order = Object.assign({}, this.order, { [P.path]: list });
+    const K = ownKeys(this.M.rows), list = P.sib.slice(0, P.a).concat(rest, P.sib.slice(P.b + 1)).filter(x => x.type !== 'space').map(x => K.get(x));
+    this.order = Object.assign({}, this.order, { [P.path]: list }); this.orderWas = null;   // (a sort's dropped order: this one now)
     this.allRows(); this.saveRows(); this.renderNames(); this.draw();
     const Q = this.ownPlace(r, blk);
-    this.toast(`${blk.length === 1 ? r.name : blk.length + ' rows'}: ${Q.i + 1} of ${Q.n} in ${P.path || 'the top'}`); return true;
+    if (!o.quiet) this.toast(`${blk.length === 1 ? r.name : blk.length + ' rows'}: ${Q.i + 1} of ${Q.n} in ${P.path || 'the top'}`); return true;
   },
   // a drag in the names: the rows of your groups (a signal, a run of selected ones, a group's header) to another place in
   // them or another group of yours; a line where they go; 6 px before it starts (a click stays a click); the pointer
@@ -972,7 +1051,7 @@ Object.assign(WaveView.prototype, {
 const SHARE = { on: false };   // markers being shared (shareMarks): the others do not share them back
 const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits', 'order'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', 'toolsCompact', 'toolLayout', 'stripGroups', 'toolAt', 'cursorStrip',
-  'cursorStripAt', ...GAP_KEYS, ...CYC_KEYS];
+  'cursorStripAt', 'scrollbar', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];
 const UNDO_N = 100;   // the steps undo keeps

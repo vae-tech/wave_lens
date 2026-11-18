@@ -1031,6 +1031,7 @@ pub(crate) fn prop_text(mut p: &Prop) -> String {
 /// The steps of a trace: (boolean, cycle).
 type Steps = Vec<(u16, usize)>;
 
+#[derive(Clone)]
 struct Rec {
     start: usize,
     end: usize,
@@ -1039,6 +1040,124 @@ struct Rec {
     failed_at: Option<usize>,
     note: Option<Note>,
     ante: Vec<usize>,
+}
+
+/// The first `cap` records by (start, end) of the ones put, at most 2 × cap held at a time; `edge`: once as many are
+/// held, the key past which none can be among the first (the starts of one assertion's attempts differ).
+struct Kept {
+    v: Vec<Rec>,
+    cap: Option<usize>,
+    edge: Option<(usize, usize)>,
+}
+
+impl Kept {
+    fn new(cap: Option<usize>) -> Kept {
+        Kept { v: Vec::new(), cap, edge: None }
+    }
+    fn wants(&self, key: (usize, usize)) -> bool {
+        self.cap != Some(0) && self.edge.is_none_or(|e| key < e)
+    }
+    fn push(&mut self, r: Rec) {
+        self.v.push(r);
+        if let Some(n) = self.cap.filter(|n| self.v.len() >= 2 * n) {
+            self.trim(n);
+        }
+    }
+    fn trim(&mut self, n: usize) {
+        self.v.sort_by_key(|r| (r.start, r.end));
+        self.v.truncate(n);
+        if self.v.len() == n {
+            self.edge = self.v.last().map(|r| (r.start, r.end));
+        }
+    }
+    fn done(mut self) -> Vec<Rec> {
+        self.trim(self.cap.unwrap_or(usize::MAX));
+        self.v
+    }
+}
+
+/// Where every decided attempt goes: counted, marked on the lane, and kept with its trace only while the list wants it
+/// (`Options::max_listed`: the failures first, then the others; a cover's matches up to `cover_traces`). Past the cap
+/// only what a cut list cannot say is kept — how many it had, the failures found first and last, the longest attempt —
+/// so an assertion failing on every cycle of a long dump holds no trace per failure (review 2026-11-18 B-05).
+struct Sink {
+    cover: bool,
+    vacuous: bool,
+    passes: bool,
+    capped: bool,
+    stats: Stats,
+    lane: Vec<u8>,
+    /// the attempts an uncut list would have
+    listable: usize,
+    fails: Kept,
+    others: Kept,
+    first_fail: Option<Rec>,
+    last_fail: Option<Rec>,
+    /// the longest decided (pass, fail, disabled) attempt: (cycles, start)
+    longest: Option<(usize, usize)>,
+}
+
+impl Sink {
+    fn put(&mut self, start: usize, end: usize, result: Status, failed_at: Option<usize>, note: Option<Note>, path: impl FnOnce() -> (Steps, Vec<usize>)) {
+        let st = &mut self.stats;
+        match result {
+            Status::Pass => st.pass += 1,
+            Status::Fail => st.fail += 1,
+            Status::Vacuous => st.vacuous += 1,
+            Status::Active => st.active += 1,
+            Status::Disabled => st.disabled += 1,
+            Status::Capped => st.capped += 1,
+        }
+        if result != Status::Vacuous && !(self.cover && result == Status::Fail) {
+            let rank = |ch: u8| b".SPCDF".iter().position(|&x| x == ch).unwrap_or(0);
+            let ends = match result {
+                Status::Pass => Some(b'P'),
+                Status::Fail => Some(b'F'),
+                Status::Disabled => Some(b'D'),
+                Status::Capped => Some(b'C'),
+                _ => None,
+            };
+            for (k, ch) in [(start, Some(b'S')), (end, ends)] {
+                if let (Some(x), Some(ch)) = (self.lane.get_mut(k), ch) {
+                    if rank(ch) > rank(*x) {
+                        *x = ch;
+                    }
+                }
+            }
+        }
+        if !self.cover && matches!(result, Status::Pass | Status::Fail | Status::Disabled) {
+            let l = (end.max(start) - start, start);
+            if self.longest.is_none_or(|(l0, s0)| (l.0, std::cmp::Reverse(l.1)) > (l0, std::cmp::Reverse(s0))) {
+                self.longest = Some(l);
+            }
+        }
+        let listable = if self.cover { result == Status::Pass } else { !((result == Status::Vacuous && !self.vacuous) || (result == Status::Pass && !self.passes)) };
+        if !listable {
+            return;
+        }
+        self.listable += 1;
+        let fail = result == Status::Fail && !self.cover;
+        let at = (failed_at.unwrap_or(end), start);
+        let key = |r: &Rec| (r.failed_at.unwrap_or(r.end), r.start);
+        let first = fail && self.capped && self.first_fail.as_ref().is_none_or(|r| at < key(r));
+        let last = fail && self.capped && self.last_fail.as_ref().is_none_or(|r| at > key(r));
+        let list = if fail { &mut self.fails } else { &mut self.others };
+        let want = list.wants((start, end));
+        if !(want || first || last) {
+            return;
+        }
+        let (steps, ante) = path();
+        let r = Rec { start, end, result, steps, failed_at, note, ante };
+        if first {
+            self.first_fail = Some(r.clone());
+        }
+        if last {
+            self.last_fail = Some(r.clone());
+        }
+        if want {
+            list.push(r);
+        }
+    }
 }
 
 /// One attempt of a group: where its own steps end (`prefix`, up to cycle `since` - 1); from `since` on it shares the
@@ -1130,10 +1249,12 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     let cover = a.kind == Kind::Cover;
     let end = opt.to.unwrap_or(tr.cycles).min(tr.cycles);
     let mut groups: Vec<Group> = Vec::new();
-    let mut recs: Vec<Rec> = Vec::new();
-    // the attempts not listed (vacuous ones; passes with options.passes false): counted, on the lane, no trace kept — a
-    // large dump has millions of them (review 2026-11-13 B-16)
-    let mut light: Vec<(usize, usize, Status)> = Vec::new();
+    // the attempts not listed (vacuous ones; passes with options.passes false; the ones past max_listed): counted, on the
+    // lane, no trace kept — a large dump has millions of them (reviews 2026-11-13 B-16, 2026-11-18 B-05)
+    let cap = if cover { Some(if cover_seq { 0 } else { opt.cover_traces }) } else { opt.max_listed };
+    let mut sink = Sink { cover, vacuous: opt.vacuous, passes: opt.passes, capped: !cover && opt.max_listed.is_some(), stats: Stats::default(),
+        lane: vec![b'.'; if opt.lane { end } else { 0 }], listable: 0, fails: Kept::new(if cover { Some(0) } else { opt.max_listed }),
+        others: Kept::new(cap), first_fail: None, last_fail: None, longest: None };
     let mut cover_hits: Vec<(usize, usize, Steps)> = Vec::new();
     let mut matches = 0usize;
     let mut gc_at = 1usize << 16;
@@ -1153,12 +1274,10 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     };
     // a decided group: one record per attempt. x reads as false; a non-vacuous pass stands, any other result of an
     // attempt that read an unknown fails naming it (option x: "false" keeps the IEEE result)
-    let unlisted = |s: Status| !cover && ((s == Status::Vacuous && !opt.vacuous) || (s == Status::Pass && !opt.passes));
-    let rec = |e: &Eng, g: &Group, v: &Verdict, c: usize, recs: &mut Vec<Rec>, light: &mut Vec<(usize, usize, Status)>| {
+    let rec = |e: &Eng, g: &Group, v: &Verdict, c: usize, sink: &mut Sink| {
         for m in &g.members {
-            let r = |result, end, p, failed_at, note| Rec { start: m.start, end, result, steps: if unlisted(result) { Vec::new() } else { e.member_path(m, p) },
-                failed_at, note, ante: if unlisted(result) { Vec::new() } else { ante(m, &g.ps) } };
-            let x = match (v, g.x) {
+            let r = |result, end, p, failed_at, note| (result, end, p, failed_at, note);
+            let (result, end, p, failed_at, note) = match (v, g.x) {
                 _ if g.capped => {
                     let p = match v {
                         Verdict::Pass { path, .. } | Verdict::Fail { path, .. } => *path,
@@ -1174,11 +1293,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                 (Verdict::Fail { at, note, path }, None) => r(Status::Fail, *at, *path, Some(*at), Some(note.clone())),
                 (Verdict::Pending, None) => unreachable!(),
             };
-            if unlisted(x.result) {
-                light.push((x.start, x.end, x.result));
-            } else {
-                recs.push(x);
-            }
+            sink.put(m.start, end, result, failed_at, note, || (e.member_path(m, p), ante(m, &g.ps)));
         }
     };
     for c in 0..end {
@@ -1188,7 +1303,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                 for g in groups.drain(..) {
                     let p = e.progress(&g.ps);
                     for m in &g.members {
-                        recs.push(Rec { start: m.start, end: c, result: Status::Disabled, steps: e.member_path(m, p), failed_at: None, note: None, ante: ante(m, &g.ps) });
+                        sink.put(m.start, c, Status::Disabled, None, None, || (e.member_path(m, p), ante(m, &g.ps)));
                     }
                 }
                 continue;
@@ -1229,7 +1344,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                 i += 1;
                 continue;
             }
-            rec(&e, &groups[i], &v, c, &mut recs, &mut light);
+            rec(&e, &groups[i], &v, c, &mut sink);
             groups.remove(i);
         }
         // attempts in the same state go on as one: their steps from here are the same
@@ -1275,15 +1390,15 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
         let strong = e.strong(&g.ps);
         if strong.is_none() {
             if let Some(v) = e.settled(&g.ps) {
-                rec(&e, g, &v, last, &mut recs, &mut light);
+                rec(&e, g, &v, last, &mut sink);
                 continue;
             }
         }
         let x = g.x.map(|(b, at, _)| xnote(&e, b, at));
         let p = g.x.map_or(p, |x| x.2); // with an unknown: the steps up to it
         for m in &g.members {
-            let r = |result, failed_at, note| Rec { start: m.start, end: last, result, steps: e.member_path(m, p), failed_at, note, ante: ante(m, &g.ps) };
-            recs.push(match &strong {
+            let r = |result, failed_at, note| (result, failed_at, note);
+            let (result, failed_at, note) = match &strong {
                 _ if g.capped => r(Status::Capped, None, Some(capped_note(&e))),
                 Some(note) => {
                     let text = match &x {
@@ -1293,57 +1408,27 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                     r(Status::Fail, Some(last), Some(Note::new("strong_end", text, None)))
                 }
                 None => r(Status::Active, None, x.clone()),
-            });
+            };
+            sink.put(m.start, last, result, failed_at, note, || (e.member_path(m, p), ante(m, &g.ps)));
         }
     }
-    recs.sort_by_key(|r| (r.start, r.end));
-    let st = &mut out.stats;
-    for r in recs.iter().map(|r| r.result).chain(light.iter().map(|l| l.2)) {
-        match r {
-            Status::Pass => st.pass += 1,
-            Status::Fail => st.fail += 1,
-            Status::Vacuous => st.vacuous += 1,
-            Status::Active => st.active += 1,
-            Status::Disabled => st.disabled += 1,
-            Status::Capped => st.capped += 1,
-        }
-    }
+    let Sink { stats, lane, listable, fails, others, first_fail, last_fail, longest, .. } = sink;
+    out.stats = Stats { attempts: out.stats.attempts, ..stats };
     if cover {
-        st.matches = Some(if cover_seq { matches } else { st.pass });
-    }
-    let mut lane = vec![b'.'; if opt.lane { end } else { 0 }];
-    let rank = |ch: u8| b".SPCDF".iter().position(|&x| x == ch).unwrap_or(0);
-    let mut mark = |k: usize, ch: u8| {
-        if let Some(x) = lane.get_mut(k) {
-            if rank(ch) > rank(*x) {
-                *x = ch;
-            }
-        }
-    };
-    for (start, end, result) in recs.iter().map(|r| (r.start, r.end, r.result)).chain(light.iter().copied()) {
-        if result == Status::Vacuous || (cover && result == Status::Fail) {
-            continue;
-        }
-        mark(start, b'S');
-        match result {
-            Status::Pass => mark(end, b'P'),
-            Status::Fail => mark(end, b'F'),
-            Status::Disabled => mark(end, b'D'),
-            Status::Capped => mark(end, b'C'),
-            _ => {}
-        }
+        out.stats.matches = Some(if cover_seq { matches } else { out.stats.pass });
     }
     if opt.lane {
         out.lane = Some(String::from_utf8(lane).unwrap());
     }
     // the passes counted only: the longest decided attempt of all said apart (the list lacks the passes)
     if !opt.passes && !cover {
-        let longest = recs.iter().map(|r| (r.start, r.end, r.result)).chain(light.iter().copied())
-            .filter(|(_, _, s)| !matches!(s, Status::Active | Status::Capped | Status::Vacuous))
-            .map(|(s0, e0, _)| (e0.max(s0) - s0, s0))
-            .max_by_key(|&(l, s0)| (l, std::cmp::Reverse(s0)));
-        out.listed = Some(Listed { passes: false, of: None, longest: longest.map(|(l, s0)| [l, s0]), last_fail: None });
+        out.listed = Some(Listed { passes: false, of: None, longest: longest.map(|(l, s0)| [l, s0]), first_fail: None, last_fail: None });
     }
+    // the list: the failures first, then the others, as many as max_listed allows (the first by start of each)
+    let fails = fails.done();
+    let room = opt.max_listed.map_or(usize::MAX, |n| n.saturating_sub(fails.len()));
+    let mut recs: Vec<Rec> = fails.into_iter().chain(others.done().into_iter().take(room)).collect();
+    recs.sort_by_key(|r| (r.start, r.end));
     let attempt = |r: &Rec| {
         let (trace, truncated) = e.steps(&r.steps);
         let reason = r.note.as_ref().map(|n| Reason {
@@ -1365,11 +1450,22 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                 Attempt { start: *start, end: *end, result: Status::Pass, trace, truncated, failed_at: None, note: None, reason: None, ante_end: Vec::new(), ante_truncated: false }
             })
             .collect()
-    } else if cover {
-        recs.iter().filter(|r| r.result == Status::Pass).take(opt.cover_traces).map(attempt).collect()
     } else {
-        recs.iter().filter(|r| (opt.vacuous || r.result != Status::Vacuous) && (opt.passes || r.result != Status::Pass)).map(attempt).collect()
+        recs.iter().map(attempt).collect()
     };
+    // a cut list: what it cannot say of all the attempts (how many, the failures found first and last, the longest)
+    let total = if cover { out.attempts.len() } else { listable };
+    if let Some(n) = opt.max_listed.filter(|n| total > *n) {
+        out.attempts.truncate(n);   // (a cover's: its matches; the others are cut already)
+        let l = out.listed.get_or_insert(Listed { passes: true, of: None, longest: None, first_fail: None, last_fail: None });
+        l.of = Some(total);
+        l.first_fail = first_fail.as_ref().map(attempt);
+        l.last_fail = last_fail.as_ref().map(attempt);
+        if l.longest.is_none() {
+            l.longest = longest.map(|(len, s0)| [len, s0]);
+        }
+        out.notes.push(format!("the first {n} of {total} attempts listed, the failures first (--max-attempts)"));
+    }
     Ok(out)
 }
 
