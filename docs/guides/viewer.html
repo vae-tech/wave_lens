@@ -119,7 +119,8 @@
     browser keeps of this view and the last state go), <span class="ui">Save page</span>,
     <span class="ui">Load assertions…</span>, each with its <kbd>g</kbd> key (<a href="#state">Save and Load</a>,
     <a href="#open">Opening waves</a>, <a href="compare.html">Compare two runs</a>, <a href="types.html">State names</a>);
-    <span class="ui">⟳</span> reads a dump opened in the page again; <span class="ui">Copy image</span> (the range, else the window, as
+    <span class="ui">⟳</span> (<kbd>R</kbd>) reads everything again from its file, changed or not: a dump opened in the page (the view kept), then the
+    assertion files of <span class="ui">Load file…</span>; <span class="ui">Copy image</span> (the range, else the window, as
     PNG to the clipboard) and its ▾ (<span class="ui">Copy image of all rows</span>, <span class="ui">Save image of all rows as SVG</span>, PNG,
     SVG, WaveDrom).</td></tr>
   <tr><td>compare</td><td>Only while a second dump is picked, compared or read: <span class="ui">A</span> <span class="ui">B</span>
@@ -695,7 +696,7 @@
   <tr><td><kbd>alt+drag</kbd></td><td>a box: time range and signals, then the menu</td><td><kbd>shift+click</kbd> a name</td>
     <td>select a run of signals</td></tr>
   <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
-  <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td><kbd>R</kbd></td><td>the dump read again from the disk, the view kept (⟳)</td></tr>
+  <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td><kbd>R</kbd></td><td>everything read again from its file: the dump (the view kept), the assertion files (⟳)</td></tr>
   <tr><td><kbd>g</kbd></td><td>a box of what can follow, to press or to click: <kbd>gg</kbd> <kbd>gl</kbd> <kbd>gt</kbd> <kbd>gT</kbd>, <kbd>gm</kbd> <kbd>gM</kbd> <kbd>gB</kbd> <kbd>gd</kbd> <kbd>gc</kbd>,
     <kbd>gs</kbd> <kbd>gL</kbd> <kbd>gr</kbd>, <kbd>gO</kbd> <kbd>gR</kbd> <kbd>gC</kbd>, <kbd>gv</kbd>, <kbd>gp</kbd></td><td><kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the same box; <kbd>yn</kbd> <kbd>yt</kbd> <kbd>yl</kbd>: copy the name, the time of the cursor, a link to here (the cursor and the signal)</td></tr>
   <tr><td><kbd>b</kbd></td><td>bookmark at the cursor (its label asked there)</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
@@ -735,7 +736,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.64 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.65 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

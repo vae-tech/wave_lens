@@ -3,7 +3,8 @@
    - localStorage: this dump's store, given in the page (#wavelens-host) and kept by the extension (workspaceState);
    - a download (an <a download> clicked: Save state, PNG, SVG, WaveDrom, the report) -> a save dialog on the host;
    - a file picker (an <input type=file> clicked: Load state, the .sv files, Open…) -> an open dialog on the host (Open…
-     a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
+     a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk); the files picked are kept by their
+     path (in the dump's store), so ⟳ reads them again on the host (WAVELENS_REREAD: the File given is a copy in memory);
    - the last state loaded in this workspace: a handle over the host's file, for Reload (r) in every tab; a new dump takes it
      (wavelens.openLastState) when it fits the dump (stateFit: else said, r applies it); Forget the kept view: this dump's store
      emptied, the last state forgotten in every tab;
@@ -108,10 +109,17 @@
     if (lastPath) v.keepState(lastState(lastPath)); else { v.root.wlState = null; v.stateShow(); } };
   // File ▾ Forget the kept view: every key of this dump's store goes (the viewer's own are gone already), the last state of the
   // workspace too (the extension tells every tab)
-  document.addEventListener('wavelens:forget', () => { for (const k of [...data.keys()]) own(k, null); lastPath = null;
+  document.addEventListener('wavelens:forget', () => { for (const k of [...data.keys()]) own(k, null); lastPath = null; picked.clear();
     vscode.postMessage({ type: 'forget' }); });
 
   /* ---- file pickers ---- */
+  // the files a pick gave (the .sv files of Load assertions…): name -> path on the host, kept in the dump's store; ⟳ of the
+  // assertions (sva.js) and ⟳ of the bar read them there again (reread: the extension reads only a file one of its picks gave)
+  const PICKED = 'wavelens-host.picked', picked = new Map(Object.entries(parse(data.get(PICKED) || '{}')));
+  G.WAVELENS_REREAD = name => { const p = picked.get(String(name)); if (!p) return null;
+    return { kind: 'file', name: p.replace(/^.*[\\/]/, ''), path: p, getFile: async () => { const m = await call('reread', { path: p });
+      if (m.error) throw new Error(m.error);
+      return new File([unb64(m.b64)], m.name, { lastModified: m.mtime }); } }; };
   const iclick = HTMLInputElement.prototype.click;
   HTMLInputElement.prototype.click = function () {
     if (this.type !== 'file') return iclick.call(this);
@@ -130,6 +138,8 @@
       if (state) { const f = m.files[0], v = view();
         if (v && await v.loadState(new File([unb64(f.b64)], f.name, { lastModified: f.mtime }), lastState(f.path))) vscode.postMessage({ type: 'state-kept' });
         return; }
+      for (const f of m.files) if (f.path) picked.set(f.name, f.path);
+      own(PICKED, picked.size ? JSON.stringify(Object.fromEntries(picked)) : null);
       const dt = new DataTransfer();
       for (const f of m.files) dt.items.add(new File([unb64(f.b64)], f.name, { lastModified: f.mtime }));
       this.files = dt.files; this.dispatchEvent(new Event('change', { bubbles: true }));

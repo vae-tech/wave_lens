@@ -385,6 +385,25 @@ class Commands(unittest.TestCase):
         self.run_ok(e, {'op': 'expr', 'id': 2, 'gap': True})
         self.assertNotIn('gapBy', e.run([{'op': 'gaps', 'reset': True}])[0]['gaps'])
 
+    def test_expr_follow(self):
+        """The gaps follow an expression's changes, as sva.js Exprs.setFollow: its row ƒ in gapSignals, drawn, the gaps on, on the
+        waves; ✂ or this; its text changed, its row off, removed: as the page does."""
+        e = ed()
+        self.run_ok(e, {'op': 'expr', 'text': 'a', 'gap': True}, {'op': 'expr', 'text': 'b', 'follow': True})
+        c = e.st['config']
+        self.assertEqual((c['gapSignals'], c['gaps'], c['gapView']), (['ƒ b'], True, True))
+        self.assertEqual(e.st['exprs'], [{'expr': 'a', 'row': False}, 'b'])   # ✂ of the others off, its row drawn
+        self.assertEqual(e.run([{'op': 'expr', 'text': 'c', 'follow': True, 'gap': True}])[0]['error'],
+                         'expr: gap (the waves cut to its matches) or follow (the gaps by its changes), not both')
+        self.run_ok(e, {'op': 'expr', 'id': 2, 'text': 'b2'})
+        self.assertEqual(e.st['config']['gapSignals'], ['ƒ b2'])
+        self.run_ok(e, {'op': 'expr', 'id': 1, 'gap': True})
+        self.assertEqual(e.st['config']['gapSignals'], [])
+        self.run_ok(e, {'op': 'expr', 'id': 2, 'follow': True}, {'op': 'expr', 'id': 2, 'row': False})
+        self.assertEqual(e.st['config']['gapSignals'], [])
+        self.run_ok(e, {'op': 'expr', 'id': 2, 'follow': True}, {'op': 'expr', 'id': 2, 'delete': True})
+        self.assertEqual((e.st['config']['gapSignals'], len(e.st['exprs'])), ([], 1))
+
     def test_marker_lanes(self):
         """A marker's text on the line of a signal: signal, lift, as view.js markList says them; pale by default."""
         e = ed()

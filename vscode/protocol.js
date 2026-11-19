@@ -26,6 +26,7 @@
     pick: { ask: 'accept multiple? state?', reply: ['files'] },    // a file picker: an open dialog on the host
     'state-kept': { ask: '', reply: null },                        // the state picked is loaded: Reload reads it
     'state-read': { ask: '', reply: ['name mtime b64'] },          // Reload (r): the last state read on the host
+    reread: { ask: 'path', reply: ['name mtime b64'] },            // ⟳ of an assertion file: a file a pick of this workspace gave, read again
     forget: { ask: '', reply: null },                              // Forget the kept view: the last state of the workspace forgotten
     compare: { ask: 'signals? from? to? path? of? pick?', reply: ['result', 'path name', ''] },   // Compare…: pick: B picked (its dialog)
     //   -> path name; else A the waves shown (of: a run) with B (path: the one picked) over the window, sva diff --page ('' closed)

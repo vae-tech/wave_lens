@@ -5,6 +5,26 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.65 — 19 November 2026
+
+One ⟳ reads everything again: the dump and every assertion file, changed or not, VS Code too; the gaps follow an
+expression of the list as they follow a signal; the MCP tool `wave_around` tells how the other signals behave round
+an expression's matches.
+
+- Reload all (asked 2026-11-19): the bar's ⟳ and the key `R` read the dump again (the view kept), then every assertion file
+  loaded, changed or not (edits on the page replaced by the file), and say it in one line (`view.reloadAll()`; a plugin adds
+  its files to `view.extraReload`). In VS Code an assertion file picked through the host was a copy in memory, so ⟳ always
+  said "no change": the tab now keeps the path of each file picked and the extension reads it again there (the message
+  `reread`, only a path its own dialog gave).
+- Gaps by an expression (asked 2026-11-19): **gaps** on a line of the Expressions list (the key `g`, or **Gaps by this signal**
+  on its ƒ row) draws it as a row and cuts the gaps by its changes as by a signal's: idle and keep as set, the pictures,
+  SVG, PNG and WaveDrom cut the same, a static SVG through `"gapSignals": ["ƒ <text>"]`; ✂ (its matches only) and gaps
+  exclude each other. The command `expr {…, follow: true}`, on a page and in a file (`viewedit`); `view_get` says `follow`.
+- MCP `wave_around`: an expression's matches (their start, end or both) with `before` / `after` cycles round them; the
+  windows that touch merged, the rest gaps; per window the values and changes of the signals asked, per signal in how many
+  windows it changed, its latency after the match in cycles (as `##n`), how long it held before, its values at the match;
+  `out` writes a page with the expression's row and the gaps on the waves.
+
 ## 0.64 — 18 November 2026
 
 Assertions edited where you look at them: ⟳ reads a file again from where Load file… read it, with no dialog; the

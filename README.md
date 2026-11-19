@@ -38,7 +38,8 @@ transactions are three plugin scripts more, inlined into a page): no build step,
 - **Scripts and AI agents**: whatever the buttons do, a command does by name — from the console, `tools/viewedit.py`
   or an MCP server, live in an open page, into the page's file or into its config (a rebuild keeps them); a PNG of each
   view without a browser open (`tools/pageshot.py`); warnings at the build for what the page would not show; one call from
-  a moment to what to look at (`wave_explain`: a match, an assertion's failure, a difference); an FSM's coverage in CI
+  a moment to what to look at (`wave_explain`: a match, an assertion's failure, a difference); what the other signals do round
+  an expression's matches (`wave_around`: the windows the viewer's gaps keep, the cycles from a match to each signal's change); an FSM's coverage in CI
   (`tools/fsmstats.py --strict`); a GTKWave save file as a view (`mkconfig.py --gtkw`); JUnit and PNGs from the build of a
   page (`mkhtml.py --junit --png`).
 

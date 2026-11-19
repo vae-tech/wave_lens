@@ -339,7 +339,8 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 <p>To work in your own editor instead: <span class="ui">⟳</span> reads the assertion's file again from where
   <span class="ui">Load file…</span> read it, with no dialog (Chrome and Edge keep the file's handle: after a reload only the permission
   is asked again; other browsers read the file loaded again while the page is open). A file built into the page is picked the first
-  time. Changed assertions are marked <b>changed</b> and evaluated again. <span class="ui">Watch</span> in the panel's header
+  time; the VS Code tab reads it on the host by its path. Changed assertions are marked <b>changed</b> and evaluated again. The bar's
+  <span class="ui">⟳</span> (<kbd>R</kbd>) reads every such file again at once, after the dump, changed or not. <span class="ui">Watch</span> in the panel's header
   (Chrome / Edge) checks those files every second: save in the editor and the page follows by itself.</p>
 <div class="note"><p>The static SVG figures of a page keep the results the page was built with; editing in the page changes the
   viewers.</p></div>
@@ -412,6 +413,12 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 </table>
 <p>The head of the list says what is left: <code>✂ 2 · 4 gaps · 120 ns of 205 ns kept</code>. An expression that never holds cuts nothing, and bookmarks stay in
   sight as with any gaps. ✂ is a part of the expression: kept with the list, and in a config (<code>"gap": true</code>) a page opens cut.</p>
+<h3 id="expr-follow">The gaps by an expression, as by a signal</h3>
+<p><span class="ui">gaps</span> on a line (<kbd>g</kbd>; or <span class="ui">Gaps ▸ Gaps by this signal</span> on its row ƒ) makes the expression a signal
+  the gaps follow: its row is drawn and where it stays the same for <i>idle</i> or longer is cut out, <i>keep</i> kept round each change. ✂ keeps where it
+  holds, this where it changes (a request starting and ending, whatever the other signals do meanwhile): either one. With signals the gaps follow too,
+  their changes go together. Pictures, their SVG and WaveDrom cut as the waves; in a config <code>"gapSignals": ["ƒ PSEL &amp;&amp; !PENABLE"]</code>
+  with the expression in <code>"exprs"</code>; the command <code>expr … follow: true</code>.</p>
 <h3>Kept, in a config, from a script</h3>
 <p>The list is kept in this browser and in the viewer's saved state. <span class="ui">JSON</span> gives it for a config:</p>
 <pre>"exprs": ["PSEL &amp;&amp; !PREADY",
@@ -557,7 +564,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.64 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.65 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -24,7 +24,7 @@ is turned into VCD text with it, kept in the extension's storage).
   read again as it is (through the extension when the window's webview cannot load it, as over a remote connection: the
   log says so), with the view as you left it.
 - **A new simulation**: the tab says when the dump changed; ⟳ (the bar, or *WaveLens: Read the dump again* in the editor's title) reads it again with the
-  view kept. `wavelens.autoReload`: at once.
+  view kept. `wavelens.autoReload`: at once. The bar's ⟳ (`R`) reads the assertion files loaded in the tab again too, on the host by their paths.
 - **The last state**, the workspace's whichever dump it was: Load… opens on that file, **Reload** (`r`) reads it in every tab, a dump seen for
   the first time takes it at once (`wavelens.openLastState`) when it fits the dump: at least half of the signals and modules it names are there, and one module of its Only — a state of other waves is not applied (said in the bar and the log; `r` applies it anyway); a dump with a view of its own keeps it. **File ▾ →
   Forget the kept view…** forgets a dump's view and the last state; *WaveLens: Forget the kept views*, every dump's.

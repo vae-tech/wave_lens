@@ -61,7 +61,7 @@ COMMANDS = {
     'bookmark': 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
     'marker': 'id? t? label? color? signal? lift? hidden? dmin? dmax? delete?', 'deltas': 'on? id? to? signal? lift? color? dmin? dmax?',
     'measures': '', 'goto': 't? sel? view? bm?', 'bus_list': 'port? kind? from? to? limit?', 'span': 'id? from? to? label? color? signals? delete?',
-    'expr': 'id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?', 'expr_go': 'id? dir? n?', 'expr_matches': 'id? from? to? limit? offset?',
+    'expr': 'id? text? scope? label? color? on? row? mark? gap? follow? radix? analog? delete?', 'expr_go': 'id? dir? n?', 'expr_matches': 'id? from? to? limit? offset?',
     'expr_markers': 'id? label? color? signal? limit? deltas? delete?',
     'group': 'name signals? add? remove? color? rename? delete? go? move? divider?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
@@ -1186,8 +1186,10 @@ class Editor:
         if a.get('delete'):
             if xid is None:
                 fail('expr: delete takes id or "all"')
+            gone = xs if xid == 'all' else [xs[xid - 1]]
             xs = [] if xid == 'all' else xs[:xid - 1] + xs[xid:]
             self.st['exprs'] = [expr_json(x) for x in xs]
+            self.follow_set(lambda p: p not in ['ƒ ' + y['text'] for y in gone])
             return {'id': xid, 'deleted': True}
         was = xs[xid - 1] if xid is not None else None
         if a.get('mark') is not None and a['mark'] not in EXPR_MARKS:
@@ -1195,6 +1197,10 @@ class Editor:
         text = expr_text(a['text']) if 'text' in a else was['text'] if was else ''
         if not text:
             fail('expr: text (an expression of the signals: PSEL && !PREADY)')
+        if a.get('follow') and a.get('gap'):
+            fail('expr: gap (the waves cut to its matches) or follow (the gaps by its changes), not both')
+        if a.get('follow') and a.get('row') is False:
+            fail('expr: follow draws its row: not with row false')
         scope = expr_text(a['scope']) if 'scope' in a else was['scope'] if was else ''
         same = [i for i, y in enumerate(xs) if y is not was and y['text'] == text and y['scope'] == scope]
         if same:
@@ -1227,10 +1233,33 @@ class Editor:
                 else:
                     m['ƒ ' + text] = a[k] if k == 'radix' else (int(a[k]) if whole(a[k]) else False)
                 self.put_map(k, m)
+        if old is not None and old != text:   # the gaps that follow it, under its new text
+            self.follow_set(lambda p: True, {'ƒ ' + old: 'ƒ ' + text})
+        key = 'ƒ ' + text
+        if a.get('follow'):   # its row drawn, the gaps on, on the waves, following it; the others' ✂ off (either)
+            x['row'] = True
+            for y in xs:
+                y['gap'] = False
+            x['gap'] = False
+            self.follow_set(lambda p: p != key, add=key)
+        elif x['gap'] or a.get('follow') is False or x['row'] is False:   # ✂ (either), or no more, or its row gone
+            self.follow_set(lambda p: p != key and not (x['gap'] and p.startswith('ƒ ')))
         if not was:
             xs.append(x)
         self.st['exprs'] = [expr_json(y) for y in xs]
         return {'id': at(xs, x)}
+
+    def follow_set(self, keep, rename=None, add=None):
+        """The gaps' signals (gapSignals) of the expressions' rows ƒ: those keep() says stay, renamed, one added (the gaps on,
+        on the waves, as Exprs.setFollow)."""
+        c, gs = self.config(), self.gap_opt()['gapSignals']
+        out = [(rename or {}).get(p, p) for p in gs if keep(p)]
+        if add and add not in out:
+            out.append(add)
+        if out != gs:
+            c['gapSignals'] = out
+        if add:
+            c['gaps'] = c['gapView'] = True
 
     def c_span(self, a):
         sid, ss = self.id_ok(a.get('id'), 'span'), self.spans()

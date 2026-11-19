@@ -34,7 +34,7 @@ const WaveSVG = {
     // leaves out and the cycles of the clock in it; under each signal counted (gapAux, with any texts; none marked: with
     // "edges" every one but the ones the gaps follow and the clock) what it did in the stretch left out (its rising and
     // falling edges, a bus its changes; "rise", "fall", "any": those)
-    const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
+    const G = V ? V.gapOpt() : S, ref = gapRefs([...M.rows, ...C.rows], G.gapSignals);   // (a plugin's row too: an expression's ƒ)
     const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
     const cuts = opts.cuts || (V ? [[from, to]] : keeps ? gapKeeps(keeps, from, to, S, clk, M.cycle, bms.map(b => b.t)) :
       gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));

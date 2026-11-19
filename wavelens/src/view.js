@@ -104,6 +104,8 @@ class WaveView {
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
     // plugins: {key, get() -> a JSON value, set(value) (may be async), undo?}: their part of the saved state (undo: undo takes it back too)
     this.extraState = [];
+    // plugins: {key, has() -> whether it has files to read again, run() -> what it says (may be async)}: ⟳ (reloadAll) reads them
+    this.extraReload = [];
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
     // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
     this.extraKeep = null;
@@ -411,7 +413,7 @@ class WaveView {
       else if (k === 't') this.modules(true, !!this.mods || !!this.sel);   // the Modules panel; open: the selected signal's module in it
       else if (k === 'T') this.fsmPanel(true);   // the state machines
       else if (k === 'r') this.reloadState();
-      else if (k === 'R') this.reloadDump();
+      else if (k === 'R') this.reloadAll();
       else if (k === 'Escape') h = false;   // handled by the viewer (reset)
       else if (this.keys[k]) this.keys[k](e);
       else h = false;
@@ -1220,6 +1222,29 @@ class WaveView {
     try { const f = d.handle ? await d.handle.getFile() : d.file; return this.openDump(f, d.handle, true); }
     catch (e) { this.toast('cannot read it again (pick it with Open…): ' + e.message); return this; }
   }
+  // ⟳ (R): everything read from a file again, from where it was last read, whether it changed or not: the dump (the view kept)
+  // and then the plugins' files (sva.js: every assertion file with a source here, edits of the page replaced) -> the viewer
+  reloadShow() { if (this.reloadBtn) this.reloadBtn.hidden = !this.opts.dumpSrc && !this.extraReload.some(x => plugSafe(x.has, this, 'a reload', null)); }
+  async reloadAll() {
+    const dump = this.opts.dumpSrc, more = () => v.extraReload.filter(x => plugSafe(x.has, v, `the reload of ${x.key}`, null));
+    let v = this;
+    if (!dump && !more().length) { this.toast('R: no dump or assertion file read here: Open… a dump, or Load assertions…'); return this; }
+    const said = [];
+    if (dump) {
+      const name = this.M.title || 'the dump';
+      await this.reloadDump();
+      v = this.root.waveView || this;
+      if (v !== this || !VIEWS.has(this)) said.push(`${name} read again`);
+      else { const t = this.root.querySelector('.bar .toast'); said.push(t ? t.textContent : `${name} not read`); }   // why it was not
+    }
+    const files = more(); if (!files.length) return v;   // the dump alone: its own toast (its signals, what it noticed) stays
+    for (const x of files) {
+      try { const s = await x.run(); if (s) said.push(s); }
+      catch (e) { said.push(`${x.key}: ${e.message}`); v.logError(e, `⟳ ${x.key}: ${e.message}`); }
+    }
+    v.toast(said.join(' · ')); v.log('ok', `⟳ ${said.join(' · ')}`);
+    return v;
+  }
   // a tool group of the bar by its label ("go to", "assertions" …), made at the end of its line when missing (TOOL_LINES;
   // another label: a line of its own at the end); content: HTML or an element, appended to the group; -> the group's element
   addTool(group, content) {
@@ -1674,7 +1699,7 @@ class WaveView {
     else if (s === 'gr') this.reloadState();
     else if (s === 'gp') bar('spage');
     else if (s === 'gO') bar('dopen');
-    else if (s === 'gR') this.reloadDump();
+    else if (s === 'gR') this.reloadAll();
     else if (s === 'gC') bar('dcmp');
     else if (s === 'gu') this.runsPanel(true);
     else if (s === 'yn') { if (this.sel) this.copyText(this.sel.name); }

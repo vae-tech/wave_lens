@@ -83,7 +83,8 @@
   <tr><td>a large dump</td><td>read as it is needed, not whole (<a href="#large">below</a>)</td></tr>
   <tr><td>a new simulation</td><td>the tab sees the dump change on the disk (polled: an NFS home works too) and offers
     <span class="ui">⟳</span> in the bar, or <i>WaveLens: Read the dump again</i> in the editor's title; the view is kept.
-    <code>wavelens.autoReload: true</code> reads it at once.</td></tr>
+    <code>wavelens.autoReload: true</code> reads it at once. The bar's <span class="ui">⟳</span> reads the assertion files you loaded again
+    too, on the host by their paths, changed or not.</td></tr>
   <tr><td>files</td><td><span class="ui">Save</span>, PNG / SVG / WaveDrom and the assertions' report ask where to save <b>on the
     host</b>; <span class="ui">Load…</span>, the <code>.sv</code> files and <span class="ui">Compare with…</span> pick there (Compare
     then runs <code>sva diff</code> on the host over the window in sight, a VCD or an FST); <span class="ui">Open dump…</span> opens a tab
@@ -218,7 +219,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.64 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.65 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

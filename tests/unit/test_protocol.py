@@ -59,7 +59,7 @@ F.run(async () => {
   const REQ = {
     page: {}, source: {}, bytes: {}, codes: { codes: [] }, 'codes-stop': { rid: 1 },
     sva: { files: [{ name: 'a.sv', source: "module tb;\n  a_cnt: assert property (@(posedge s) cnt == 4'd3);\nendmodule\n" }], scope: 'tb' }, store: { key: 'k', value: 'v' }, gstore: { key: 'bar', value: '{"v":1}' }, save: { name: 'x.txt', b64: Buffer.from('hi').toString('base64') },
-    pick: { accept: '.json', multiple: false, state: true }, 'state-kept': {}, 'state-read': {}, forget: {},
+    pick: { accept: '.json', multiple: false, state: true }, 'state-kept': {}, 'state-read': {}, reread: { path: state }, forget: {},
     compare: { signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000, of: 0 }, open: { path: state }, sources: {}, config: {}, clip: { text: 'PSEL' }, theme: {},
     result: { rid: 99, results: [] }, ready: { title: 't' }, loaded: { name: 't.vcd', shown: 2, total: 2 },
     dumperror: { name: 't.vcd', error: 'the time goes back', line: 9 }, log: { text: 'a line' }, configerror: { text: 'boom' },
@@ -71,6 +71,9 @@ F.run(async () => {
     ['compare', { run: 1, signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000 }], ['compare', { run: 1, against: 0, signals: ['tb.s'], from: 0, to: 30000 }],
     ['keep', { from: 0, to: 10000, of: 0 }], ['cut', { from: 0, to: 10000, of: 1 }], ['cancel', {}], ['dir', { keep: true }], ['dir', { keep: false }],
     ['rm', { run: 1 }]];
+  // ⟳ of an assertion file reads only a file a pick (not of a state) gave: none yet, refused; picked, read
+  out.rereadNone = await ask({ type: 'reread', path: state });
+  dialog = state; await ask({ type: 'pick', accept: '.sv,.sva', multiple: true });
   const walked = [];
   for (const type of Object.keys(P.PAGE)) {
     const p = P.PAGE[type];
@@ -162,6 +165,7 @@ class Walk(unittest.TestCase):
             H.vcd(d, BODY.replace('#10\n1!', '#15\n1!'), HEAD, name='other.vcd')
             o = node(d, PROTO, p)
         walked = o['walked']
+        self.assertIn('not a file picked here', o['rereadNone'].get('error', ''), 'reread: a path no pick gave is refused')
         runs = next(w for w in walked if 'walkedOps' in w)
         self.assertEqual(sorted(runs['ops']), sorted(set(runs['walkedOps'])), 'every operation of runs walked')
         bad = [w for w in walked if 'walkedOps' not in w and not w.get('ok')]

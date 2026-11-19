@@ -16,7 +16,8 @@ const TIPS = {
   'act:fcase': ['Match case', ['alt+C']], 'act:fword': ['Full match: the whole name (a.b: the end of the path)', ['alt+W']],
     'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
   '.ev': ['The value to find (0x40, \'h40, 64, -3, IDLE)', ['Enter', 'shift+Enter']],
-  'act:dopen': ['Open a VCD dump here (or drop it on the viewer)', ['gO']], 'act:dreload': ['Read the dump again, the view kept', ['R']],
+  'act:dopen': ['Open a VCD dump here (or drop it on the viewer)', ['gO']],
+  'act:dreload': ['Read everything again from its file, changed or not: the dump (the view kept) and the assertion files', ['R']],
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
   'act:dcmp': ['Pick a second dump (a VCD of another run) as B; Compare then shows where its values differ over the window in sight: a red band on the ' +
@@ -245,7 +246,7 @@ const HELP = [
     [['⋯'], 'a narrow bar (the short form): the rest of a group'],
     [['⚙ Arrange the bar…'], 'drag a group by its label (Esc: back); the keys: alt+↑ ↓ ← → move a group, Space shows / hides it'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)'],
-    [['R'], 'the dump read again from the disk, the view kept (⟳)']]],
+    [['R'], 'everything read again from its file: the dump (the view kept), the assertion files (⟳)']]],
   ['Menus', [[['g'], 'a moment after it: a box with what can follow, press the key or click it: go to, markers and bookmarks, the state, the dump'],
     [['z', 'y', '[', ']'], 'the same box: fold, copy, next, previous'], [['Esc'], 'with the box open: closes it, nothing else'],
     [['t', 'T'], 'the panels of the modules, the state machines'], [['gm', 'gl'], 'the lists of the markers and bookmarks, your groups'],
@@ -265,7 +266,8 @@ const KEY_MENUS = {
     ['Markers and bookmarks'], ['m', 'the list of them…', anyMark], ['M', 'a marker at the cursor'], ['B', 'a bookmark at the cursor'],
     ['d', v => (v.deltas ? 'hide the Δ between markers' : 'show the Δ between markers'), v => v.umarks.length], ['c', 'clear them all', anyMark],
     ['The state'], ['s', 'save…', onBar('ssave')], ['L', 'load…', onBar('sload')], ['r', 'reload', v => v.root.wlState],
-    ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload', v => v.opts.dumpSrc], ['C', 'compare…', onBar('dcmp')],
+    ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload all: the dump and the assertion files', onBar('dreload')],
+    ['C', 'compare…', onBar('dcmp')],
     ['=', 'compare A and B over the window in sight', v => v.cmp || v.cmpPend()],
     ['b', v => (v.cmpMask !== false ? 'no red mask on the differences' : 'the differences masked in red'), v => v.cmp],
     ['u', 'the runs kept…', onBar('druns')],
@@ -410,7 +412,7 @@ class Bar {
         mItem('druns', 'Runs…', 'g u', v.runsHost() ? '' : ' hidden') + '<hr>' + mItem('ssave', 'Save view…', 'g s') + mItem('sload', 'Load view…', 'g L') +
         mItem('sreload', 'Reload view', 'r', ' hidden') + mItem('sforget', 'Forget the kept view…') + mItem('spage', 'Save page', 'g p', ' class="spage"') +
         mItem('svload', 'Load assertions…', '', ' hidden')),
-      btn('dreload', '⟳', ' aria-label="read the dump again" hidden'),
+      btn('dreload', '⟳', ' aria-label="read the dump and the assertion files again" hidden'),
       more(seg(btn('copyimg', 'Copy image'), popHead('img', '▾', 'pimg', 'more of the picture')),
         popBox('img', mItem('copyall', 'Copy image of all rows') + mItem('svgall', 'Save image of all rows as SVG') + '<hr>' +
           mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
@@ -537,7 +539,7 @@ class Bar {
       if (f) v.comparePick({ file: f, name: f.name }); });
     v.srcfile = r.querySelector('input.srcfile');
     v.srcfile.addEventListener('change', () => { const fs = [...v.srcfile.files]; v.srcfile.value = ''; if (fs.length) v.setSources(fs); });
-    v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadBtn.hidden = !v.opts.dumpSrc;
+    v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadShow();
     // a file dropped on the viewer: a VCD replaces its waves, a saved state (.json) is loaded
     // (on the viewer's element, which outlives this viewer when a dump replaces it: removed by destroy() through v.ac)
     const own = { signal: v.ac.signal };
@@ -646,7 +648,7 @@ class Bar {
     else if (a === 'dprev' || a === 'dnext') v.diffStep(a === 'dnext' ? 1 : -1);
     else if (a === 'dsrc') v.srcfile.click();
     else if (a === 'svload') { const s = v.root.querySelector('button[data-sv=load]'); if (s) s.click(); }
-    else if (a === 'dreload') v.reloadDump();
+    else if (a === 'dreload') v.reloadAll();
     else if (a === 'live') liveClick();
     else if (a === 'more') v.popToggle(b, b.closest('.tg').querySelector(':scope > .more'));
     v.barSync();

@@ -343,6 +343,8 @@ const typesFile = f => f.replace(/\.(vcd|fst)$/i, '') + '.types.json';
 
 /* ---------------- a tab: one dump in a webview ---------------- */
 const LAST_STATE = 'lastState';   // workspaceState: the path of the state loaded last
+const PICKED = 'picked';   // workspaceState: the files the tabs' picks gave (the .sv files of Load assertions…), the ones reread reads
+const PICKED_MAX = 500;
 const GLOBAL_BAR = 'wavelens.bar';   // globalState: the bar of every tab {bar: the text of wavelens.bar, look: {toolsHidden, toolsFolded}}
 class Tab {
   constructor(uri, panel) {
@@ -608,6 +610,7 @@ ${scripts}
       case 'state-kept': return this.stateKept();
       case 'forget': return forgetLast();
       case 'state-read': return reply(await this.stateRead());
+      case 'reread': return reply(await this.reread(String(m.path || '')));
       case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to,
         typeof m.path === 'string' && m.path ? m.path : null, m.of, !!m.pick));
       case 'runs': return reply(await this.runs(m));
@@ -707,6 +710,14 @@ ${scripts}
       return { name: path.basename(p), mtime: st.mtimeMs, b64: (await fs.promises.readFile(p)).toString('base64') }; }
     catch (e) { return { error: e.message }; }
   }
+  // ⟳ of an assertion file (and ⟳ of the bar): a file a pick of this workspace gave, read again (no other path: the page asks
+  // by a path it was given)
+  async reread(p) {
+    if (!(CTX.workspaceState.get(PICKED) || []).includes(p)) return { error: `${path.basename(p)}: not a file picked here: pick it again` };
+    try { const st = await fs.promises.stat(p);
+      return { name: path.basename(p), mtime: st.mtimeMs, b64: (await fs.promises.readFile(p)).toString('base64') }; }
+    catch (e) { return { error: e.message }; }
+  }
   async pick(accept, multiple, state = false) {
     const exts = [...new Set(accept.split(',').map(s => s.trim()).filter(s => s.startsWith('.')).map(s => s.slice(1)))];
     if (exts.includes('vcd')) exts.push('fst');
@@ -722,6 +733,10 @@ ${scripts}
     for (const u of got) {
       const f = await vcdOf(u.fsPath), st = await fs.promises.stat(u.fsPath);
       files.push({ name: path.basename(u.fsPath), path: u.fsPath, mtime: st.mtimeMs, b64: (await fs.promises.readFile(f)).toString('base64') });
+    }
+    if (!state) {   // the page reads them again by their paths (reread), this tab and the next one of the dump
+      const was = (CTX.workspaceState.get(PICKED) || []).filter(x => !files.some(f => f.path === x));
+      await CTX.workspaceState.update(PICKED, was.concat(files.map(f => f.path)).slice(-PICKED_MAX));
     }
     return { files };
   }

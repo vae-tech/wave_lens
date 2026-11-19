@@ -2675,7 +2675,8 @@ const TIPS = {
   'act:fcase': ['Match case', ['alt+C']], 'act:fword': ['Full match: the whole name (a.b: the end of the path)', ['alt+W']],
     'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
   '.ev': ['The value to find (0x40, \'h40, 64, -3, IDLE)', ['Enter', 'shift+Enter']],
-  'act:dopen': ['Open a VCD dump here (or drop it on the viewer)', ['gO']], 'act:dreload': ['Read the dump again, the view kept', ['R']],
+  'act:dopen': ['Open a VCD dump here (or drop it on the viewer)', ['gO']],
+  'act:dreload': ['Read everything again from its file, changed or not: the dump (the view kept) and the assertion files', ['R']],
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
   'act:dcmp': ['Pick a second dump (a VCD of another run) as B; Compare then shows where its values differ over the window in sight: a red band on the ' +
@@ -2904,7 +2905,7 @@ const HELP = [
     [['⋯'], 'a narrow bar (the short form): the rest of a group'],
     [['⚙ Arrange the bar…'], 'drag a group by its label (Esc: back); the keys: alt+↑ ↓ ← → move a group, Space shows / hides it'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)'],
-    [['R'], 'the dump read again from the disk, the view kept (⟳)']]],
+    [['R'], 'everything read again from its file: the dump (the view kept), the assertion files (⟳)']]],
   ['Menus', [[['g'], 'a moment after it: a box with what can follow, press the key or click it: go to, markers and bookmarks, the state, the dump'],
     [['z', 'y', '[', ']'], 'the same box: fold, copy, next, previous'], [['Esc'], 'with the box open: closes it, nothing else'],
     [['t', 'T'], 'the panels of the modules, the state machines'], [['gm', 'gl'], 'the lists of the markers and bookmarks, your groups'],
@@ -2924,7 +2925,8 @@ const KEY_MENUS = {
     ['Markers and bookmarks'], ['m', 'the list of them…', anyMark], ['M', 'a marker at the cursor'], ['B', 'a bookmark at the cursor'],
     ['d', v => (v.deltas ? 'hide the Δ between markers' : 'show the Δ between markers'), v => v.umarks.length], ['c', 'clear them all', anyMark],
     ['The state'], ['s', 'save…', onBar('ssave')], ['L', 'load…', onBar('sload')], ['r', 'reload', v => v.root.wlState],
-    ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload', v => v.opts.dumpSrc], ['C', 'compare…', onBar('dcmp')],
+    ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload all: the dump and the assertion files', onBar('dreload')],
+    ['C', 'compare…', onBar('dcmp')],
     ['=', 'compare A and B over the window in sight', v => v.cmp || v.cmpPend()],
     ['b', v => (v.cmpMask !== false ? 'no red mask on the differences' : 'the differences masked in red'), v => v.cmp],
     ['u', 'the runs kept…', onBar('druns')],
@@ -3069,7 +3071,7 @@ class Bar {
         mItem('druns', 'Runs…', 'g u', v.runsHost() ? '' : ' hidden') + '<hr>' + mItem('ssave', 'Save view…', 'g s') + mItem('sload', 'Load view…', 'g L') +
         mItem('sreload', 'Reload view', 'r', ' hidden') + mItem('sforget', 'Forget the kept view…') + mItem('spage', 'Save page', 'g p', ' class="spage"') +
         mItem('svload', 'Load assertions…', '', ' hidden')),
-      btn('dreload', '⟳', ' aria-label="read the dump again" hidden'),
+      btn('dreload', '⟳', ' aria-label="read the dump and the assertion files again" hidden'),
       more(seg(btn('copyimg', 'Copy image'), popHead('img', '▾', 'pimg', 'more of the picture')),
         popBox('img', mItem('copyall', 'Copy image of all rows') + mItem('svgall', 'Save image of all rows as SVG') + '<hr>' +
           mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
@@ -3196,7 +3198,7 @@ class Bar {
       if (f) v.comparePick({ file: f, name: f.name }); });
     v.srcfile = r.querySelector('input.srcfile');
     v.srcfile.addEventListener('change', () => { const fs = [...v.srcfile.files]; v.srcfile.value = ''; if (fs.length) v.setSources(fs); });
-    v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadBtn.hidden = !v.opts.dumpSrc;
+    v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadShow();
     // a file dropped on the viewer: a VCD replaces its waves, a saved state (.json) is loaded
     // (on the viewer's element, which outlives this viewer when a dump replaces it: removed by destroy() through v.ac)
     const own = { signal: v.ac.signal };
@@ -3305,7 +3307,7 @@ class Bar {
     else if (a === 'dprev' || a === 'dnext') v.diffStep(a === 'dnext' ? 1 : -1);
     else if (a === 'dsrc') v.srcfile.click();
     else if (a === 'svload') { const s = v.root.querySelector('button[data-sv=load]'); if (s) s.click(); }
-    else if (a === 'dreload') v.reloadDump();
+    else if (a === 'dreload') v.reloadAll();
     else if (a === 'live') liveClick();
     else if (a === 'more') v.popToggle(b, b.closest('.tg').querySelector(':scope > .more'));
     v.barSync();
@@ -3797,6 +3799,8 @@ class WaveView {
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
     // plugins: {key, get() -> a JSON value, set(value) (may be async), undo?}: their part of the saved state (undo: undo takes it back too)
     this.extraState = [];
+    // plugins: {key, has() -> whether it has files to read again, run() -> what it says (may be async)}: ⟳ (reloadAll) reads them
+    this.extraReload = [];
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
     // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
     this.extraKeep = null;
@@ -4104,7 +4108,7 @@ class WaveView {
       else if (k === 't') this.modules(true, !!this.mods || !!this.sel);   // the Modules panel; open: the selected signal's module in it
       else if (k === 'T') this.fsmPanel(true);   // the state machines
       else if (k === 'r') this.reloadState();
-      else if (k === 'R') this.reloadDump();
+      else if (k === 'R') this.reloadAll();
       else if (k === 'Escape') h = false;   // handled by the viewer (reset)
       else if (this.keys[k]) this.keys[k](e);
       else h = false;
@@ -4913,6 +4917,29 @@ class WaveView {
     try { const f = d.handle ? await d.handle.getFile() : d.file; return this.openDump(f, d.handle, true); }
     catch (e) { this.toast('cannot read it again (pick it with Open…): ' + e.message); return this; }
   }
+  // ⟳ (R): everything read from a file again, from where it was last read, whether it changed or not: the dump (the view kept)
+  // and then the plugins' files (sva.js: every assertion file with a source here, edits of the page replaced) -> the viewer
+  reloadShow() { if (this.reloadBtn) this.reloadBtn.hidden = !this.opts.dumpSrc && !this.extraReload.some(x => plugSafe(x.has, this, 'a reload', null)); }
+  async reloadAll() {
+    const dump = this.opts.dumpSrc, more = () => v.extraReload.filter(x => plugSafe(x.has, v, `the reload of ${x.key}`, null));
+    let v = this;
+    if (!dump && !more().length) { this.toast('R: no dump or assertion file read here: Open… a dump, or Load assertions…'); return this; }
+    const said = [];
+    if (dump) {
+      const name = this.M.title || 'the dump';
+      await this.reloadDump();
+      v = this.root.waveView || this;
+      if (v !== this || !VIEWS.has(this)) said.push(`${name} read again`);
+      else { const t = this.root.querySelector('.bar .toast'); said.push(t ? t.textContent : `${name} not read`); }   // why it was not
+    }
+    const files = more(); if (!files.length) return v;   // the dump alone: its own toast (its signals, what it noticed) stays
+    for (const x of files) {
+      try { const s = await x.run(); if (s) said.push(s); }
+      catch (e) { said.push(`${x.key}: ${e.message}`); v.logError(e, `⟳ ${x.key}: ${e.message}`); }
+    }
+    v.toast(said.join(' · ')); v.log('ok', `⟳ ${said.join(' · ')}`);
+    return v;
+  }
   // a tool group of the bar by its label ("go to", "assertions" …), made at the end of its line when missing (TOOL_LINES;
   // another label: a line of its own at the end); content: HTML or an element, appended to the group; -> the group's element
   addTool(group, content) {
@@ -5367,7 +5394,7 @@ class WaveView {
     else if (s === 'gr') this.reloadState();
     else if (s === 'gp') bar('spage');
     else if (s === 'gO') bar('dopen');
-    else if (s === 'gR') this.reloadDump();
+    else if (s === 'gR') this.reloadAll();
     else if (s === 'gC') bar('dcmp');
     else if (s === 'gu') this.runsPanel(true);
     else if (s === 'yn') { if (this.sel) this.copyText(this.sel.name); }
@@ -8464,14 +8491,16 @@ command('measures', '', 'the Δ of your markers as a table (shown or not): [{fro
 v => ({ measures: measureList(v) }));
 // the expressions of the page: its list is the plugin's (wavelens/sva.js), which needs the engine
 const exprs = v => v.svaExprs || fail('expressions need the assertion engine in the page (sva.js and sva.wasm.js: no mkhtml.py --no-sva)');
-command('expr', 'id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?', 'an expression of the signals in the list of expressions ' +
+command('expr', 'id? text? scope? label? color? on? row? mark? gap? follow? radix? analog? delete?',
+  'an expression of the signals in the list of expressions ' +
   '(SystemVerilog, as ' +
   'in an assertion; @(posedge clk) … samples it at a clock; names from scope up to the top, a full path too): a new one (text; a text that does not value ' +
   'is refused), or expression id (1, 2 … as listed) changed; label: its text on the waves, color (null: the colour of its place), on: its marks, mark: ' +
   'band (a pale band where it holds), line (where it starts) or strip (only the strip at the top), row: drawn as a signal too; gap: the waves cut to the ' +
-  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); radix, analog (rows, ' +
+  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); follow: the ' +
+  'gaps follow its changes as a signal\'s (gaps signals: its row ƒ, drawn; the gaps on, on the waves; gap or follow); radix, analog (rows, ' +
   'null: none): of its row, a bus when the value is wider than a bit ({a, b}, addr - base); delete: id or "all"; ' +
-  '-> what it found (n, time, share, first, last, min, max), with gap what the waves leave (cut)', (v, a) => {
+  '-> what it found (n, time, share, first, last, min, max), with gap or follow what the waves leave (cut)', (v, a) => {
   idOk(a.id, 'expression'); cmdColor(a);
   if (a.radix != null && !isRadix(a.radix)) fail(`radix: one of ${RADIX.join(', ')}, q8, sq15 …, not ${JSON.stringify(a.radix)}`);
   return exprs(v).set(a);
@@ -8883,6 +8912,7 @@ command('gaps', 'on? idle? keep? signals? clock? aux? only? count? view? reset?'
     view: 'gapView' };
   const o = Object.fromEntries(Object.entries(map).filter(([k]) => a[k] !== undefined).map(([k, g]) => [g, a[k]]));
   if (Object.keys(o).length) v.setGaps(o);
+  v.flushHeld();   // the rows as they are now (an expression's row ƒ the gaps follow, made in this run)
   const cut = v.gapParts(50);   // on the waves: what they leave
   return { gaps: v.gapOpt(), ...(cut ? { cut } : {}) };
 });
@@ -11997,7 +12027,7 @@ const WaveSVG = {
     // leaves out and the cycles of the clock in it; under each signal counted (gapAux, with any texts; none marked: with
     // "edges" every one but the ones the gaps follow and the clock) what it did in the stretch left out (its rising and
     // falling edges, a bus its changes; "rise", "fall", "any": those)
-    const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
+    const G = V ? V.gapOpt() : S, ref = gapRefs([...M.rows, ...C.rows], G.gapSignals);   // (a plugin's row too: an expression's ƒ)
     const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
     const cuts = opts.cuts || (V ? [[from, to]] : keeps ? gapKeeps(keeps, from, to, S, clk, M.cycle, bms.map(b => b.t)) :
       gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
@@ -12345,7 +12375,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.64',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.65',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

@@ -459,13 +459,16 @@ SVA.pickFiles = async () => {
   for (const f of fs) FILES.set(f.name, f);
   return fs;
 };
-// where ⟳ reads `name` from: 'handle', 'file' (the File loaded in this page), or null (it asks for the file)
-SVA.source = name => (HANDLES.has(name) ? 'handle' : FILES.has(name) ? 'file' : null);
+// a host that reads a file it picked again by its path (VS Code: host.js) -> its handle-like {name, path, getFile}, or null: the
+// File its dialog gave is a copy in memory, never newer
+const hostHandle = name => (typeof G.WAVELENS_REREAD === 'function' && G.WAVELENS_REREAD(name)) || null;
+// where ⟳ reads `name` from: 'handle', 'host' (VS Code's file by its path), 'file' (the File loaded in this page), or null (it asks)
+SVA.source = name => (HANDLES.has(name) ? 'handle' : hostHandle(name) ? 'host' : FILES.has(name) ? 'file' : null);
 const pickFile = name => (G.showOpenFilePicker && !SVA.noHandles
   ? G.showOpenFilePicker({ multiple: false, id: 'wavelens-sva', types: SV_TYPES }).then(([h]) => h)
   : inputFiles(false).then(([f]) => { FILES.set(name, f); return { name: f.name, getFile: async () => f, once: true }; }));
 async function handleOf(name, pick) {
-  let h = HANDLES.get(name);
+  let h = HANDLES.get(name) || hostHandle(name);
   if (!h) { try { h = await idb('readonly', st => st.get(hkey(name))); } catch (e) { h = null; } }
   if (!h && FILES.has(name)) {   // the File loaded: read again (a browser that keeps it a snapshot refuses: picked again)
     const f = FILES.get(name);
@@ -482,10 +485,30 @@ SVA.reload = async (name, opt = {}) => {
   const h = await handleOf(name, opt.pick !== false); if (!h) return { changed: false, name };
   const f = await h.getFile(), text = await f.text(), cur = active().find(x => x.name === name);
   MTIME.set(name, f.lastModified);
-  if (cur && cur.source === text && !opt.force) return { changed: false, name, picked: h.name };
+  const same = !!cur && cur.source === text;   // force: loaded all the same (⟳ of the bar), changed says whether it did
+  if (same && !opt.force) return { changed: false, name, picked: h.name };
   await SVA.loadFiles([{ name, text }]);
-  return { changed: true, name, picked: h.name };
+  return { changed: !same, name, picked: h.name };
 };
+// ⟳ of the bar (R): every assertion file with a source here (a handle, VS Code's path, the File loaded) read again, no dialog,
+// loaded whether it changed or not (the page's edits of it replaced) -> {read: [names], changed: [names], none: [names without a
+// source: the page's own, one never loaded here], failed: ['name: why']}
+SVA.reloadAll = async () => {
+  const out = { read: [], changed: [], none: [], failed: [] }, texts = [];
+  for (const name of [...new Set(active().map(f => f.name))]) {
+    try {
+      const h = await handleOf(name, false); if (!h) { out.none.push(name); continue; }
+      const f = await h.getFile(), text = await f.text(), cur = active().find(x => x.name === name);
+      MTIME.set(name, f.lastModified); texts.push({ name, text }); out.read.push(name);
+      if (!cur || cur.source !== text) out.changed.push(name);
+    } catch (e) { out.failed.push(`${name}: ${e.message}`); }
+  }
+  if (texts.length) await SVA.loadFiles(texts);   // parsed once, as one unit
+  for (const f of active()) if (out.read.includes(f.name)) f.edited = false;
+  return out;
+};
+// whether ⟳ of the bar has an assertion file to read (a source known in this page; the browser's database is not asked)
+SVA.reloadable = () => active().some(f => SVA.source(f.name));
 // Watch: every second the files with a handle; a newer one is read, parsed and its bindings evaluated again
 SVA.watch = on => {
   clearInterval(LIB.watchT); LIB.watching = !!on;
@@ -1270,6 +1293,8 @@ class Panel {
     // undo: the bindings and the hidden ones (not the files read: a load is no step of its own)
     if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s), fit: s => this.fit(s),
       undo: () => ({ bind: this.bindJSON(), hidden: [...this.hidden] }) });
+    // ⟳ of the bar (R): every assertion file read again from where it was loaded (LIB is the page's: one viewer's panel reads them)
+    if (v.extraReload) v.extraReload.push({ key: 'assertions', has: () => SVA.reloadable(), run: () => this.reloadAll() });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
     this.selA = null; this.dirty = true; this.at = new Map(); this.sumN = 0;
     this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value;
@@ -1831,6 +1856,17 @@ class Panel {
     await this.queue;
     this.toast(bs.length ? `${label}: ${bs.map(b => outcome(b) ? plainCounts(outcome(b)) : b.state).join(' · ')}` : `${label}: applied (not bound)`);
   }
+  // ⟳ of the bar: the files read again, the editors on them closed; -> what it says
+  async reloadAll() {
+    const r = await SVA.reloadAll(), n = r.read.length, few = l => l.slice(0, 3).join(', ') + (l.length > 3 ? ', …' : '');
+    if (this.fl) { const fx = LIB.byLabel.get(this.fl.label); if (fx && r.read.includes(fx.file.name)) { this.fl.text = this.fl.err = null; this.flRender(); } }
+    await this.queue;
+    for (const x of r.failed) this.v.log('error', `⟳ ${x}`);
+    if (r.none.length) this.v.log('info', `⟳: ${r.none.length} assertion file${r.none.length === 1 ? '' : 's'} not loaded from a file here (the page's own, ` +
+      'or loaded before this page: ⟳ on its line picks it once)', { items: r.none });
+    return (n ? `${n} assertion file${n === 1 ? '' : 's'} read again (${r.changed.length ? 'changed: ' + few(r.changed) : 'no change'}), evaluated` :
+      'no assertion file read again') + (r.failed.length ? ` · not read: ${few(r.failed)}` : '');
+  }
   async reloadFile(name) {
     try {
       const r = await SVA.reload(name);
@@ -1933,6 +1969,7 @@ class Panel {
     if (el) el.innerHTML = this.bindHTML(b); else this.render();
   }
   render() {
+    if (this.v.reloadShow) this.v.reloadShow();   // ⟳ of the bar: shown while a file has a source to read again
     const all = this.qAll(), el = this.el;
     const orphans = this.bindings.filter(b => !LIB.byLabel.has(b.assert) && this.qOk(b));
     el.hidden = !all.length && !LIB.notes.length && !this.bindings.some(b => !LIB.byLabel.has(b.assert));
@@ -2609,6 +2646,10 @@ class Exprs {
     if (names !== this.names) { this.names = names; this.again(); } else { this.cutText(); if (!this.el.hidden) this.render(); }   // (the library)
   }
   redraw() {
+    // the gaps that follow an expression: its row's changes may be new (its values came, its text changed)
+    const fl = this.list.filter(x => x.row && this.follows(x)), fk = fl.map(x => x.res);
+    if (fl.length && (!this.fk || fk.length !== this.fk.length || fk.some((r, i) => r !== this.fk[i]))) {
+      this.fk = fk; this.v.warpMemo = null; this.v.gapMemo = null; }
     const cut = this.list.some(x => x.gap);
     if (cut !== !!this.cut) { this.cut = cut; this.v.gapsChanged(); this.cutText(); return; }   // the gaps on or off: the head, the bar
     this.v.renderNames(); this.v.draw(); if (cut) this.cutText();
@@ -2663,7 +2704,8 @@ class Exprs {
     const list = x.open && S ? `<ol class="atl">${S.slice(0, EXPR_LIST_MAX).map(([a, b], k) => `<li><button type="button" data-x="match"
       data-k="${k}">#${k + 1}</button> ${esc(this.v.when(a))} · ${esc(this.dur(b - a))}</li>`).join('')}${more}</ol>` : '';
     return `<li data-i="${i}" tabindex="0" class="${x === this.cur ? 'here' : ''}${err ? ' bad' : ''}"
-      title="click: go to its next match · ↑ ↓ the other expressions · ← → its matches · space: its marks on or off · c: the waves cut to it">
+      title="click: go to its next match · ↑ ↓ the other expressions · ← → its matches · space: its marks on or off · c: the waves cut to it ·
+g: the gaps follow it">
       <span class="an">${i + 1}</span>
       <span class="xc"><input type="checkbox" data-c="on"${x.on ? ' checked' : ''} aria-label="mark it on the waves" title="Mark it on the waves"><input
         type="color" data-c="color" value="${esc(this.hexOf(x))}" aria-label="its colour" title="Its colour on the waves"></span>
@@ -2675,7 +2717,9 @@ class Exprs {
           data-c="mark" aria-label="how it is marked"
           title="On the waves: a pale band where it holds, a line where it starts, or only the strip at the top">${MARK_KINDS.map(k =>
     `<option${k === x.mark ? ' selected' : ''}>${k}</option>`).join('')}</select>${btn('gap', '✂', 'Cut the waves to its matches, with the others that ' +
-    'have ✂: idle and keep on the bar, a gap between them', x.gap)}${btn('row', 'ƒ row', 'Draw it as a signal (ƒ expressions)', x.row)}${
+    'have ✂: idle and keep on the bar, a gap between them', x.gap)}${btn('follow', 'gaps', 'The gaps follow its changes, as a signal\'s (Gaps by ' +
+    'this signal): where it stays the same longer than idle is cut out, keep round each change (the bar\'s idle and keep), its row drawn; ✂ or this',
+    this.follows(x))}${btn('row', 'ƒ row', 'Draw it as a signal (ƒ expressions)', x.row)}${
   btn('mk', '|Δ|', 'Each match in the window as a marker, the Δ between them on (again: they go)', this.marked(x))}${
   btn('list', '≡', 'List its matches', !!x.open)}${btn('edit', '✎', 'Edit it (ctrl+Enter applies)')}${btn('del', '✕', 'Remove it')}</span>
       ${list}${this.ed && this.ed.x === x ? this.editHTML() : ''}</li>`;
@@ -2757,6 +2801,7 @@ class Exprs {
     return this.go(this.list[k < 0 ? (dir > 0 ? 0 : n - 1) : (k + dir + n) % n], 1);
   }
   remove(x) {
+    if (this.follows(x)) this.unfollow(x);
     this.list.splice(this.list.indexOf(x), 1); this.st.rows && this.st.rows.delete(x);
     if (this.v.sel && this.v.sel.x === x) this.v.select(null);
     if (this.cur === x) this.unpick();
@@ -2776,8 +2821,9 @@ class Exprs {
       else if (a === 'auto' && this.ed && this.ed.x) { this.ed.x.color = null; this.save(); this.render(); this.redraw(); }
       else if (x) {
         if (a === 'forth' || a === 'back') this.go(x, a === 'forth' ? 1 : -1);
-        else if (a === 'row') { x.row = !x.row; this.save(); this.render(); this.redraw(); }
+        else if (a === 'row') { x.row = !x.row; if (!x.row && this.follows(x)) this.setFollow(x, false); this.save(); this.render(); this.redraw(); }
         else if (a === 'gap') this.setGap(x, !x.gap);
+        else if (a === 'follow') this.setFollow(x, !this.follows(x));
         else if (a === 'mk') this.v.run({ op: 'expr_markers', id: this.list.indexOf(x) + 1, delete: this.marked(x) || undefined });
         else if (a === 'list') { x.open = !x.open; this.render(); }
         else if (a === 'edit') this.edit(x);
@@ -2799,8 +2845,31 @@ class Exprs {
     this.save(); this.redraw();
   }
 
-  // ✂ of one expression: the waves change at once
-  setGap(x, on) { x.gap = on; this.save(); this.render(); this.redraw(); this.told({ changed: x.text }); }
+  // ✂ of one expression: the waves change at once (the gaps that follow an expression go: ✂ or those)
+  setGap(x, on) { x.gap = on; if (on) this.unfollow(); this.save(); this.render(); this.redraw(); this.told({ changed: x.text }); }
+  // the gaps that follow an expression as a signal's (the menu's Gaps by this signal on its row ƒ): the row's path in gapSignals
+  fkey(x) { return 'ƒ ' + x.text; }
+  follows(x) { return this.v.gapOpt(true).gapSignals.includes(this.fkey(x)); }
+  // on: the gaps follow its changes (its row drawn, the gaps on, on the waves), the others' ✂ off (✂ keeps the matches, these
+  // the changes: either); off: no more (the gaps stay on, by the signals left or the rows drawn)
+  setFollow(x, on, quiet = false) {
+    const v = this.v, k = this.fkey(x), gs = v.gapOpt(true).gapSignals.filter(p => p !== k);
+    if (on) { x.row = true; gs.push(k); if (this.list.some(y => y.gap)) { this.list.forEach(y => { y.gap = false; }); this.cut = false; } }
+    this.save(); this.render();
+    v.setGaps(on ? { gapSignals: gs, gaps: true, gapView: true } : { gapSignals: gs });
+    if (!quiet) this.told({ changed: x.text });
+  }
+  // the gaps follow none of the expressions (one gone; ✂ on); keep: the text of one that stays
+  unfollow(only = null) {
+    const g = this.v.gapOpt(true), mine = p => (only ? p === this.fkey(only) : this.list.some(y => this.fkey(y) === p));
+    const gs = g.gapSignals.filter(p => !mine(p));
+    if (gs.length !== g.gapSignals.length) this.v.setGaps({ gapSignals: gs });
+  }
+  // its text changed: the gaps follow it under the new one
+  moveFollow(from, to) {
+    const g = this.v.gapOpt(true); if (from === to || !g.gapSignals.includes(from)) return;
+    this.v.setGaps({ gapSignals: g.gapSignals.map(p => (p === from ? to : p)) });
+  }
 
   /* ---------------- the editor: under its line, or over the list for a new one ---------------- */
   edit(x) {
@@ -2913,8 +2982,9 @@ class Exprs {
     if (same >= 0) { say(`it is there already (${same + 1})`); return; }
     const res = await this.value({ text, scope });
     if (res.err) { say(res.err); return; }
-    const was = e.x, x = was || exprNorm({ expr: text, row: false, on: true });
+    const was = e.x, x = was || exprNorm({ expr: text, row: false, on: true }), from = was && this.fkey(was);
     Object.assign(x, { text, scope, label: e.label.trim(), res });
+    if (was) this.moveFollow(from, this.fkey(x));
     x.k = null;
     if (!was) this.list.push(x);
     this.ed = null; this.save(); this.render(); this.redraw();
@@ -2946,6 +3016,7 @@ class Exprs {
     else if (e.key === 'ArrowLeft') this.go(x, -1);
     else if (e.key === ' ') { x.on = !x.on; this.save(); this.render(); const l = this.lineEl(x); if (l) l.focus(); }
     else if (e.key === 'c') { this.setGap(x, !x.gap); const l = this.lineEl(x); if (l) l.focus(); }
+    else if (e.key === 'g') { this.setFollow(x, !this.follows(x)); const l = this.lineEl(x); if (l) l.focus(); }
     else return;
     e.preventDefault();
   }
@@ -2957,7 +3028,7 @@ class Exprs {
   }
   summary(x) {
     const r = x.res || {}, j = exprJSON(x), o = Object.assign({ id: this.list.indexOf(x) + 1 }, typeof j === 'string' ? { expr: j } : j,
-      { on: x.on, row: x.row, mark: x.mark, gap: x.gap });
+      { on: x.on, row: x.row, mark: x.mark, gap: x.gap, follow: this.follows(x) });
     return Object.assign(o, r.err ? { error: r.err } : r.stat ? { ...r.stat } : {});
   }
   async set(a) {
@@ -2970,6 +3041,8 @@ class Exprs {
     const was = a.id != null ? this.byId(a.id, 'expr') : null, text = a.text !== undefined ? exprText(a.text) : was ? was.text : '';
     if (a.mark != null && !MARK_KINDS.includes(a.mark)) throw new Error(`expr: mark is ${MARK_KINDS.join(', ')}, not ${JSON.stringify(a.mark)}`);
     if (!text) throw new Error('expr: text (an expression of the signals: PSEL && !PREADY)');
+    if (a.follow && a.gap) throw new Error('expr: gap (the waves cut to its matches) or follow (the gaps by its changes), not both');
+    if (a.follow && a.row === false) throw new Error('expr: follow draws its row: not with row false');
     const scope = a.scope !== undefined ? exprText(a.scope) : was ? was.scope : '';
     const same = this.list.findIndex(y => y !== was && y.text === text && y.scope === scope);
     if (same >= 0) throw new Error(`expr: it is there already (id ${same + 1})`);
@@ -2987,15 +3060,19 @@ class Exprs {
     if (a.mark != null) x.mark = a.mark;
     if (a.gap !== undefined) x.gap = !!a.gap;
     if (!was) this.list.push(x);
-    if (was && oldKey !== 'ƒ ' + text) this.moveLook(oldKey, 'ƒ ' + text);   // its row's radix / analog go with its new text
+    if (was && oldKey !== 'ƒ ' + text) { this.moveLook(oldKey, 'ƒ ' + text); this.moveFollow(oldKey, 'ƒ ' + text); }   // its row's radix, analog, gaps
     try { this.rowLook(x, a); } catch (e) {   // undone: the list and the expression as they were
       if (was) { for (const k of Object.keys(x)) if (!(k in before)) delete x[k]; Object.assign(x, before);
         if (oldKey !== 'ƒ ' + text) this.moveLook('ƒ ' + text, oldKey); } else this.list.splice(this.list.indexOf(x), 1);
       throw e;
     }
+    if (x.gap) this.unfollow();
+    if (a.follow !== undefined && !!a.follow !== this.follows(x)) this.setFollow(x, !!a.follow, true);
+    if (a.row === false && this.follows(x)) this.setFollow(x, false, true);
     this.save(); this.render(); this.redraw();
     this.told(was ? { changed: x.text } : { added: x.text });
-    const cut = a.gap !== undefined && this.v.gapParts(50);   // what the waves leave now
+    if (a.gap !== undefined || a.follow !== undefined) this.v.flushHeld();   // (in a run: the rows ƒ laid out, the gaps by them)
+    const cut = (a.gap !== undefined || a.follow !== undefined) && this.v.gapParts(50);   // what the waves leave now
     return Object.assign(this.summary(x), cut ? { cut } : {});
   }
   async goTo(a) {

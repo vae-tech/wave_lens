@@ -85,6 +85,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     failure (<code>assert: "name@scope"</code> with <code>sva</code>, its files: the window from the attempt's start), the first difference with another
     dump (<code>b</code>; <code>table_b</code>: its values), or a time (<code>t</code>) — its window, its signals and their values there, and with <code>out</code>
     (a <code>.html</code>) a page marked at it</td></tr>
+  <tr><td><code>wave_around</code></td><td>what the signals do round an expression's matches, the windows the viewer's gaps keep: each match a window of
+    <code>before</code> / <code>after</code> cycles round its start (<code>at</code>: <code>end</code>, or <code>both</code>: round each change of it), windows that touch one part —
+    the parts with each signal's value and first changes there, and per signal in how many it changed, the cycles from a match to its first change after
+    it (<code>##n</code>) and from its last change before, its values at the match; <code>out</code>: the page with the expression's row and its gaps</td></tr>
   <tr><td><code>wave_fsm</code></td><td>an FSM's states in a dump: entries, time held, the states never reached, the values of no state, its changes
     (the page's FSM panel's count; <code>tools/fsmstats.py --strict</code> for CI)</td></tr>
   <tr><td><code>wave_runs</code></td><td>the runs kept of a dump (<code>sva runs</code>, the ones the VS Code Runs panel keeps in
@@ -347,7 +351,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.64 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.65 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

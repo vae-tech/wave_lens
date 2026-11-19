@@ -2029,7 +2029,10 @@ def vscode_tab(browser, build):
         codes: m => window.lazyCodes(m.codes).then(text => ({ text })),
         sva: () => (window.__SVAERR ? { error: window.__SVAERR } : { text: '{"clock":"","unit":"ps","cycle_runs":[],"assertions":[]}' }),
         save: m => (window.__cancel ? { cancel: true } : { path: '/host/dumps/' + m.name }),
-        pick: m => ({ files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] }),
+        pick: m => ({ files: /fst/.test(m.accept) ? [] : /\.sv/.test(m.accept) ? [{ name: 'more.sva', path: '/host/sv/more.sva', mtime: 1, b64: btoa(window.__SV) }] :
+          [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] }),
+        // ⟳ of an assertion file: the .sv picked, as it is on the disk now (__SV)
+        reread: m => (m.path === '/host/sv/more.sva' ? { name: 'more.sva', mtime: 2, b64: btoa(window.__SV) } : { error: 'not a file picked here' }),
         'state-read': () => (window.__S ? { name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { error: 'gone' }),
         // the dialog closed; path (Compare… again, A moved): a result of that file, its path back; its window rounded to ps as the
         // extension asks sva diff, B's end __CMPEND (a B shorter than the window)
@@ -2204,6 +2207,32 @@ def vscode_tab(browser, build):
     n = len(sent('pick'))
     js("(v.openDump(), 0)"); until(f"window.__sent.filter(m => m.type === 'pick').length > {n}", timeout=5000)
     check('.fst' in sent('pick')[-1]['accept'] and not page.evaluate('!!window.showOpenFilePicker'), 'Open…: a pick of a dump (no showOpenFilePicker)')
+    # Load assertions…: the .sv picked on the host is kept by its path; ⟳ of its line and ⟳ of the bar read it there again (the
+    # File the pick gave is a copy in memory: read again, it never changed — the bug of 0.64), the bar's the dump too
+    sv = "module more_chk(input logic s);\n  more_a: assert property (@(posedge s) 1);\nendmodule\n"
+    page.evaluate(f"window.__SV = {json.dumps(sv)}"); n_p0 = len(sent('pick'))
+    js("(v.root.querySelector('.bar button[data-sv=load]').hidden = false, v.root.querySelector('.bar button[data-sv=load]').click(), 0)")
+    until("window.SVA && SVA.assertions().some(a => a.label === 'more_a')")
+    kept = page.evaluate("window.__STORE['wavelens-host.picked']")
+    check(json.loads(kept or '{}') == {'more.sva': '/host/sv/more.sva'} and page.evaluate("SVA.source('more.sva')") == 'host',
+          f'Load assertions…: the file picked kept by its path on the host ({kept})')
+    page.evaluate(f"window.__SV = {json.dumps(sv.replace('s) 1', 's) ##1 1'))}")
+    js("(SVA.panels()[0].reloadFile('more.sva'), 0)")
+    until("SVA.assertions().find(a => a.label === 'more_a').text.includes('##1')")
+    check(len(sent('reread')) == 1 and len(sent('pick')) == n_p0 + 1, f'⟳ of the file: read again on the host by its path, no dialog {sent("reread")}')
+    page.evaluate(f"window.__SV = {json.dumps(sv.replace('s) 1', 's) ##2 1'))}")
+    n_src, n_pick = len(sent('source')), len(sent('pick'))
+    check(not js("v.reloadBtn.hidden"), 'the bar\'s ⟳ shown')
+    js("(v.reloadBtn.click(), 0)")
+    until("SVA.assertions().find(a => a.label === 'more_a').text.includes('##2')")
+    until("WaveLens.views().find(x => x.root.isConnected).root.querySelector('.bar .toast').textContent.includes('assertion file')")
+    toast = js("v.root.querySelector('.bar .toast').textContent")
+    check(len(sent('source')) == n_src + 1 and len(sent('reread')) == 2 and len(sent('pick')) == n_pick and 'enum.vcd read again' in toast and
+          '1 assertion file read again (changed: more.sva)' in toast, f'the bar\'s ⟳: the dump and the assertion file read again, no dialog ({toast!r})')
+    js("(v.reloadBtn.click(), 0)")
+    until(f"window.__sent.filter(m => m.type === 'reread').length > 2")
+    until("WaveLens.views().find(x => x.root.isConnected).root.querySelector('.bar .toast').textContent.includes('no change')")
+    check(len(sent('source')) == n_src + 2, 'the bar\'s ⟳ again: read again all the same, said unchanged')
     js("navigator.clipboard.writeText('PSEL')")
     check(any(m.get('text') == 'PSEL' for m in sent('clip')), 'the clipboard through VS Code')
     # review VI T9: "changed" fetches the dump once more and reads it: one more source and load than before, the new values
@@ -9283,6 +9312,18 @@ def sva_float(browser, build):
     page.wait_for_function("(SVA.assertions().find(a => a.label === 'more_a') || {}).text && SVA.assertions().find(a => a.label === 'more_a').text.includes('##1')")
     got = page.evaluate('[window.__disk.picks, window.__disk.multi, SVA.source("more.sva")]')
     check(got == [1, True, 'handle'], f'Load file… keeps the handle: ⟳ reads more.sva again with no second dialog {got}')
+    # the bar's ⟳ (R): no dump read here, the assertion files with a source read again, the page's own left as they are
+    page.evaluate("""window.__disk.text = window.__disk.text.replace('PSEL |-> ##1 1', 'PSEL |-> ##2 1')""")
+    rb = v.locator('.bar button[data-act=dreload]')
+    check(rb.is_visible(), 'the bar\'s ⟳ shown: an assertion file to read again')
+    rb.click()
+    page.wait_for_function("SVA.assertions().find(a => a.label === 'more_a').text.includes('##2')")
+    page.wait_for_function("document.querySelector('.wv .bar .toast').textContent.includes('assertion file')")
+    toast = v.locator('.bar .toast').inner_text()
+    check('1 assertion file read again (changed: more.sva)' in toast and page.evaluate('window.__disk.picks') == 1, f'⟳ of the bar: more.sva read again, no dialog ({toast!r})')
+    page.evaluate("SVA.panels()[0].v.canvas.focus()"); page.keyboard.press('R')
+    page.wait_for_function("document.querySelector('.wv .bar .toast').textContent.includes('no change')")
+    check('1 assertion file read again (no change)' in v.locator('.bar .toast').inner_text(), 'R: the same, read again all the same and said unchanged')
     # no handles: the File of the input read again while the page lives
     page.evaluate("delete window.showOpenFilePicker; SVA.noHandles = true")
     src = ROOT / 'tests' / 'sva' / 'apb.sv'
@@ -9300,6 +9341,88 @@ def sva_float(browser, build):
     check(not errs, 'no page errors' + (': ' + ' | '.join(errs[:2]) if errs else ''))
     ctx.close()
 
+
+
+def expr_follow(browser, build):
+    """On the APB page: the gaps follow an expression's changes as a signal's (its line's gaps, g, expr follow, the menu's Gaps by
+    this signal on its row ƒ): its row drawn, where it stays longer than idle cut out, keep round each change; ✂ or this; the
+    picture, its SVG and WaveDrom cut as the waves; renamed and removed with it; a static SVG of a config."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('assertions: the gaps follow an expression')
+    ctx = browser.new_context(viewport={'width': 1360, 'height': 1200})
+    page = ctx.new_page()
+    errs = []; page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    page.evaluate('SVA.ready()')
+    v = page.locator('.wv').first
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView, x = v.svaExprs; {e} }})()")
+    panel, lines = v.locator('.sva.xpanel'), lambda: v.locator('.sva.xpanel ol.xl > li')
+    ns = lambda ps: [[a / 1000, b / 1000] for a, b in ps]
+    parts = lambda: ns((js('return v.gapParts(20);') or {'parts': []})['parts'])
+    frow = "WaveLens.internal.peek(document.querySelector('.wv').waveView).vis.find(r => r.full === 'ƒ PSEL && !PENABLE')"
+    js("v.setGaps({ gapIdle: 3, gapKeep: 1 }); x.toggle(true); return x.setList([{ expr: 'PSEL && !PENABLE', row: false }, { expr: 'PENABLE && PREADY', row: false }]);")
+    page.wait_for_function("document.querySelector('.wv').waveView.svaExprs.list.every(y => y.res) && document.querySelectorAll('.wv .xpanel ol.xl > li').length === 2")
+    b = lines().first.locator('[data-x=follow]')
+    check(b.get_attribute('aria-pressed') == 'false' and b.inner_text() == 'gaps', 'a line has gaps, off')
+    b.click(); page.wait_for_function(f"!!{frow} && {frow}.tr.length > 1")
+    page.wait_for_timeout(50)
+    g = js("return [v.gapOpt(true).gapSignals, v.gapOpt().gaps, v.gapOpt().gapView, x.list[0].row];")
+    ch = js(f"return {frow}.tr.slice(1).map(o => o.t / 1000);")
+    p1 = parts()
+    inside = all(any(a <= t <= b2 for a, b2 in p1) for t in ch)
+    check(g == [['ƒ PSEL && !PENABLE'], True, True, True] and lines().first.locator('[data-x=follow]').get_attribute('aria-pressed') == 'true',
+          f'gaps on a line: the gaps follow its row ƒ (drawn), on, on the waves {g}')
+    check(len(p1) > 1 and inside and sum(b2 - a for a, b2 in p1) < 205, f'…each change of it in a part kept, the stretches it stays cut out {p1} {ch}')
+    same = js("""const k = v.gapParts(20).parts; v.setGaps({ gapSignals: ['apb_tb.PSEL'] }); const s = v.gapParts(20).parts;
+        v.setGaps({ gapSignals: ['ƒ PSEL && !PENABLE'] }); return [JSON.stringify(k) === JSON.stringify(v.gapParts(20).parts), JSON.stringify(k) !== JSON.stringify(s)];""")
+    check(same == [True, True], f'…its own gaps, not a signal\'s {same}')
+    js("v.setGaps({ gapKeep: 0 });"); p0 = parts()
+    check(sum(b2 - a for a, b2 in p0) < sum(b2 - a for a, b2 in p1), f'…keep on the bar narrows them at once {p0}')
+    js("v.setGaps({ gapKeep: 1 });")
+    # the picture and WaveDrom: what the waves keep
+    pic = js("""const s = v.toSVG(), n = (s.match(/class="gap"/g) || []).length; const wd = v.toWaveDrom(0, 205000);
+        const kept = c => JSON.stringify(c.filter(([p, q]) => q > p));
+        return [s.includes('ƒ PSEL'), kept(v.cutsOf(0, 205000, v.screenRows())) === kept(v.gapParts(20).parts), JSON.stringify(wd).includes('ƒ PSEL'), wd.foot.text];""")
+    check(pic[0] and pic[1] and pic[2] and 'idle stretch' in pic[3], f'the picture (SVG) and WaveDrom: its row and the parts the waves keep {pic}')
+    # ✂ or this: ✂ on another line ends it; gaps again ends the ✂
+    lines().nth(1).locator('[data-x=gap]').click(); page.wait_for_timeout(50)
+    a = js("return [v.gapOpt(true).gapSignals, v.gapOpt().gapBy, x.list[1].gap];")
+    check(a == [[], [2], True], f'✂ on another line: the gaps follow it no more, ✂ cuts {a}')
+    lines().first.focus(); page.keyboard.press('g'); page.wait_for_timeout(50)
+    a = js("return [v.gapOpt(true).gapSignals, v.gapOpt().gapBy || null, x.list.map(y => y.gap), document.activeElement.dataset.i];")
+    check(a == [['ƒ PSEL && !PENABLE'], None, [False, False], '0'], f'g on a line: following it again, ✂ off, the focus kept {a}')
+    # the menu: Gaps by this signal on its row ƒ says it, and takes it off
+    r = js(f"""const r = {frow}, el = WaveLens.internal.peek(v).namesEl.querySelector(`.row[data-r="${{WaveLens.internal.peek(v).vis.indexOf(r)}}"]`);
+        el.scrollIntoView({{ block: 'center' }}); const q = el.getBoundingClientRect(); return [q.left + 30, q.top + q.height / 2];""")
+    page.mouse.click(r[0], r[1], button='right'); mn = page.locator('.wv-menu')
+    sub = mn.locator('.subh').filter(has_text='Gaps').first; sub.hover(); sub.click(); page.wait_for_timeout(50)
+    it = mn.locator('[data-m=gref]')
+    t = it.inner_text() if it.count() else ''
+    it.click(); page.wait_for_timeout(50); page.keyboard.press('Escape')
+    a = js("return [v.gapOpt(true).gapSignals, x.follows(x.list[0])];")
+    check(t and a == [[], False] and lines().first.locator('[data-x=follow]').get_attribute('aria-pressed') == 'false',
+          f'the menu on its row ƒ: the gaps by it ({t!r}), taken off there, the line says so {a}')
+    # the command: follow, its text changed (the gaps go with it), its row off ends it, removed: gone from the gaps
+    o = js("""return v.run([{ op: 'expr', id: 1, follow: true }, { op: 'expr', id: 1, text: 'PSEL && !PENABLE && PWRITE' }, { op: 'gaps' },
+        { op: 'expr', id: 1, row: false }, { op: 'expr', id: 2, follow: true }, { op: 'expr', id: 2, delete: true }, { op: 'gaps' },
+        { op: 'expr', text: 'PSEL', follow: true, gap: true }]);""")
+    check(o[0].get('follow') is True and o[0].get('cut', {}).get('gaps', 0) > 0 and o[2]['gaps']['gapSignals'] == ['ƒ PSEL && !PENABLE && PWRITE']
+          and o[2]['cut']['gaps'] > 0 and o[3].get('follow') is False and o[4].get('follow') is True and 'cut' in o[4] and o[6]['gaps']['gapSignals'] == [] and 'not both' in o[7].get('error', ''),
+          f'expr follow: the gaps by it (cut), its text changed with them, row false ends it, removed: gone; with gap: refused {o}')
+    st = js("""return (async () => { await v.run([{ op: 'expr', id: 1, follow: true }]); const s = v.state(); x.unfollow(); await v.setState(s);
+        return [s.config.gapSignals, v.gapOpt(true).gapSignals, x.follows(x.list[0])]; })();""")
+    check(st[0] == st[1] == ['ƒ PSEL && !PENABLE && PWRITE'] and st[2] is True, f'…in a state, and back when it is loaded {st}')
+    # a static SVG of the page's config: gapSignals naming a row ƒ
+    sv = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView, d = Object.assign({}, v.M.src, { config: Object.assign({}, v.M.src.config,
+        { gaps: true, gapIdle: 3, gapKeep: 1, gapSignals: ['ƒ PSEL && !PENABLE'] }), sva: Object.assign({}, v.M.src.sva, { exprs: [{ expr: 'PSEL && !PENABLE' }] }) });
+      WaveLens.WaveSVG.toString(d); await new Promise(f => setTimeout(f, 300)); const s = WaveLens.WaveSVG.toString(d);
+      const d2 = Object.assign({}, d, { config: Object.assign({}, d.config, { gapSignals: ['apb_tb.PSEL'] }) }); const s2 = WaveLens.WaveSVG.toString(d2);
+      return [s.includes('ƒ PSEL'), (s.match(/ ns<\\/text>/g) || []).length, s === s2]; }""")
+    check(sv[0] and not sv[2], f'the static SVG: the gaps by the row ƒ the config names, not the signals\' {sv[:1] + sv[2:]}')
+    check(not errs, 'no page errors' + (': ' + ' | '.join(errs[:2]) if errs else ''))
+    ctx.close()
 
 def sva_report(browser, build):
     """Stage 8 in the APB page: totals and table against sva eval's report, the count filter, the failure list, exports."""
@@ -11576,6 +11699,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'menus': 'the right button\'s menu in submenus: its shape in each mode (no scroll at 1280×600), Here ▸ on the axis, the keys, the pointer, its place, the tips',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
     'sva_report': 'stage 8: the report against sva eval',
+    'expr_follow': 'the gaps follow an expression\'s changes as a signal\'s: its line, g, expr follow, the menu on its row ƒ, pictures, WaveDrom, a static SVG',
     'sva_float': '$past / $stable marks, the floating editor of an assertion, ⟳ from where Load file… read it',
     'sva_edit': 'an assertion edited in the page (✎, Apply, kept, Revert, a bad text) and read from the disk again (⟳, Watch)',
     'sva_report_hardening': 'stage 8.1: names, aliases, recovery, caps, print, mkconfig --update, make html SVA=',
@@ -11869,6 +11993,7 @@ def main():
         run('sva_report', sva_report, b, build)
         run('sva_edit', sva_edit, b, build)
         run('sva_float', sva_float, b, build)
+        run('expr_follow', expr_follow, b, build)
         run('sva_report_hardening', sva_report_hardening, b, build)
         b.close()
     run('sva_wasm', sva_wasm, build)

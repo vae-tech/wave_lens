@@ -560,7 +560,7 @@ class Views(unittest.TestCase):
         self.assertEqual((out[0]['t'], out[0]['k'], out[1]['time'], out[1]['n'], out[1]['share'], out[2]['first'], out[2]['matches'], out[3]['exprs']),
                          (5, 1, 3, 2, 0.5, 1, [[1, 2]], [{'id': 1, 'n': 1, 'first': 4, 'share': 0.25}]))
         self.assertEqual(W.ns_out([{'op': 'expr', 'cut': {'gaps': 2, 'kept': 5000, 'total': 20000, 'parts': [[2000, 7000]]}}], True)[0]['cut'], {'gaps': 2, 'kept': 5, 'total': 20, 'parts': [[2, 7]]})
-        self.assertIn('expr(id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
+        self.assertIn('expr(id? text? scope? label? color? on? row? mark? gap? follow? radix? analog? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
 
     def test_gaps_view(self):
         """The gaps on the waves in the agent's words: view_get says them, a cut (the page's) in ns."""
@@ -1130,7 +1130,7 @@ class Protocol(unittest.TestCase):
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
         # codex exec calls a tool without approval only when it says it reads: every tool but the ones that write a file
         self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']],
-                         ['wave_explain', 'wave_page', 'wave_to_fst', 'wave_runs', 'wave_cut', 'view_edit', 'view_live'])
+                         ['wave_explain', 'wave_around', 'wave_page', 'wave_to_fst', 'wave_runs', 'wave_cut', 'view_edit', 'view_live'])
         arrays = [(t['name'], k) for t in r[1]['result']['tools'] for k, v in t['inputSchema']['properties'].items()
                   if 'array' in str(v.get('type')) and 'items' not in v]
         self.assertEqual(arrays, [])   # an array without items is refused by OpenAI's function schemas
@@ -1420,6 +1420,62 @@ def two_runs(d, shift=0, name='a.vcd'):
         f.write('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " a $end\n$var wire 4 # bus [3:0] $end\n'
                 '$upscope $end\n$enddefinitions $end\n' + ''.join(f'#{t}\n' + '\n'.join(ev[t]) + '\n' for t in sorted(ev)))
     return path
+
+
+class Around(unittest.TestCase):
+    """wave_around: windows round an expression's matches, as the viewer's gaps keep them, and what the other signals do there:
+    a dump of req (sampled high at the edges of 25, 35 and 125 ns) and ack answering two cycles later."""
+    @classmethod
+    def setUpClass(cls):
+        cls.d = H.tmp()
+        ev = {}
+        for t in range(0, 201, 5):
+            ev.setdefault(t, []).append(('1' if (t // 5) % 2 else '0') + '!')   # posedge at 5, 15, 25 …
+        for t, x in ((0, '0"'), (20, '1"'), (40, '0"'), (120, '1"'), (130, '0"'), (0, '0#'), (43, '1#'), (63, '0#'), (143, '1#'), (163, '0#')):
+            ev.setdefault(t, []).append(x)
+        cls.vcd = os.path.join(cls.d.name, 'r.vcd')
+        with open(cls.vcd, 'w', encoding='utf-8') as f:
+            f.write('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " req $end\n$var wire 1 # ack $end\n'
+                    '$upscope $end\n$enddefinitions $end\n' + ''.join(f'#{t}\n' + '\n'.join(ev[t]) + '\n' for t in sorted(ev)))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.d.cleanup()
+
+    def call(self, **a):
+        text, err = W.call('wave_around', {'dump': self.vcd, **a})
+        self.assertFalse(err, text)
+        return json.loads(text)
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_windows_round_the_starts(self):
+        r = self.call(expr='req', signals=['ack', 'req'], before=1, after=3)
+        self.assertEqual((r['matches'], r['cycles_matched'], r['parts'], r['gaps'], r['kept'], r['total']), (2, 3, 2, 1, 80, 200))
+        self.assertEqual([(w['from'], w['to'], w['matches']) for w in r['windows']], [(15, 55, [[25, 35]]), (115, 155, [[125, 125]])])
+        self.assertEqual(r['windows'][0]['signals']['ack'], {'initial': '0', 'changes': [[43, '1']]})
+        # ack: ##2 after each match (seen at the second edge after it), 0 there; req: falls one or two cycles after, rose one before
+        self.assertEqual(r['signals']['ack'], {'changed_in': 2, 'of': 2, 'after': {'n': 2, 'min': 2, 'max': 2}, 'at_match': {'0': 2}})
+        self.assertEqual(r['signals']['req'], {'changed_in': 2, 'of': 2, 'after': {'n': 2, 'min': 1, 'max': 2},
+                                               'before': {'n': 2, 'min': 1, 'max': 1}, 'at_match': {'1': 2}})
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_round_its_changes_the_expressions_signals_and_a_page(self):
+        r = self.call(expr='req', at='both', before=1, after=1, changes=0, limit=1)
+        self.assertEqual((r['parts'], r['more'], list(r['signals'])), (2, 1, ['req']))   # signals: the expression's own
+        self.assertEqual(r['windows'][0], {'from': 15, 'to': 55, 'matches': [[25, 35]], 'signals': {'req': {'initial': '0', 'more': 2}}})
+        out = os.path.join(self.d.name, 'p.html')
+        r = self.call(expr='req', signals='ack', at='both', out=out)
+        pg = E.Page(out)
+        st = pg.state(pg.view())
+        self.assertEqual((r['page'], st['exprs'], st['config']['gapSignals'], st['config']['gaps'], st['config']['gapView']),
+                         (out, [{'expr': 'req', 'scope': 'tb'}], ['ƒ req'], True, True))
+
+    def test_its_arguments(self):
+        for a, said in (({'expr': 'req', 'at': 'middle'}, '"at"'), ({'expr': 'req', 'before': -1}, '"before"'), ({}, '"expr"'),
+                        ({'expr': 'req', 'changes': 'x'}, '"changes"')):
+            text, err = W.call('wave_around', {'dump': self.vcd, **a})
+            self.assertTrue(err, text)
+            self.assertIn(said, text)
 
 
 @H.needs(svabuild.find_bin(), 'no sva CLI')

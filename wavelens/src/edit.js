@@ -293,14 +293,16 @@ command('measures', '', 'the Δ of your markers as a table (shown or not): [{fro
 v => ({ measures: measureList(v) }));
 // the expressions of the page: its list is the plugin's (wavelens/sva.js), which needs the engine
 const exprs = v => v.svaExprs || fail('expressions need the assertion engine in the page (sva.js and sva.wasm.js: no mkhtml.py --no-sva)');
-command('expr', 'id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?', 'an expression of the signals in the list of expressions ' +
+command('expr', 'id? text? scope? label? color? on? row? mark? gap? follow? radix? analog? delete?',
+  'an expression of the signals in the list of expressions ' +
   '(SystemVerilog, as ' +
   'in an assertion; @(posedge clk) … samples it at a clock; names from scope up to the top, a full path too): a new one (text; a text that does not value ' +
   'is refused), or expression id (1, 2 … as listed) changed; label: its text on the waves, color (null: the colour of its place), on: its marks, mark: ' +
   'band (a pale band where it holds), line (where it starts) or strip (only the strip at the top), row: drawn as a signal too; gap: the waves cut to the ' +
-  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); radix, analog (rows, ' +
+  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); follow: the ' +
+  'gaps follow its changes as a signal\'s (gaps signals: its row ƒ, drawn; the gaps on, on the waves; gap or follow); radix, analog (rows, ' +
   'null: none): of its row, a bus when the value is wider than a bit ({a, b}, addr - base); delete: id or "all"; ' +
-  '-> what it found (n, time, share, first, last, min, max), with gap what the waves leave (cut)', (v, a) => {
+  '-> what it found (n, time, share, first, last, min, max), with gap or follow what the waves leave (cut)', (v, a) => {
   idOk(a.id, 'expression'); cmdColor(a);
   if (a.radix != null && !isRadix(a.radix)) fail(`radix: one of ${RADIX.join(', ')}, q8, sq15 …, not ${JSON.stringify(a.radix)}`);
   return exprs(v).set(a);
@@ -712,6 +714,7 @@ command('gaps', 'on? idle? keep? signals? clock? aux? only? count? view? reset?'
     view: 'gapView' };
   const o = Object.fromEntries(Object.entries(map).filter(([k]) => a[k] !== undefined).map(([k, g]) => [g, a[k]]));
   if (Object.keys(o).length) v.setGaps(o);
+  v.flushHeld();   // the rows as they are now (an expression's row ƒ the gaps follow, made in this run)
   const cut = v.gapParts(50);   // on the waves: what they leave
   return { gaps: v.gapOpt(), ...(cut ? { cut } : {}) };
 });

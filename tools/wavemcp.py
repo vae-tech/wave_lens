@@ -46,7 +46,7 @@ INSTRUCTIONS = (
     'Waveform (VCD/FST) analysis. Times are ns (numbers) unless a unit is given ("2.5us"). Signal names: full path, '
     'path under "scope", or a unique tail ("PSEL"). Start with wave_info, then wave_signals to find names; ask for '
     'values (wave_values, wave_changes, wave_sample), search with wave_find (an SV expression or sequence on a clock, '
-    'or a value / edge of one signal), count with wave_stats, check SystemVerilog assertions with sva_check, compare two runs with wave_diff. Sampled '
+    'or a value / edge of one signal), count with wave_stats, check SystemVerilog assertions with sva_check, compare two runs with wave_diff, see what the other signals do round an expression\'s matches with wave_around. Sampled '
     'values are the ones just before the clock edge, as SVA samples; cycle numbers are the clock\'s rising edges from '
     'the start of the dump (the same as sva_check\'s). Long answers are cut at "limit" ("more", "next_from" / '
     '"next_offset" say how to go on). wave_tests says which tests of a cocotb run failed, when, and what they expected. wave_page writes a viewer page to show a person; view_edit marks it up for them '
@@ -682,6 +682,137 @@ def t_explain(a):
     return out
 
 
+
+def expr_names(w, expr, scope):
+    """The signals an expression names that the dump has (wave_explain's rule): the default signals to look at."""
+    out = []
+    for n in EXPLAIN_SIGS.findall(re.sub(r'\$\w+|\d+\'[sS]?[bBhHdDoO][0-9a-fA-FxXzZ_]+', ' ', expr)):
+        try:
+            w.find(n, scope)
+            if n not in out:
+                out.append(n)
+        except WaveError:
+            pass
+    return out
+
+
+AROUND_AT = ('start', 'end', 'both')
+
+
+def t_around(a):
+    """wave_around: an expression's matches as the viewer's gaps keep them — each stretch of cycles where it holds, a window of
+    before / after cycles round its start (at "end": its end; "both": round each of its changes, as the gaps that follow it on
+    the waves), windows that touch merged into one part, the rest of the dump the gaps — and what the signals did there: per
+    part their value at its start and their changes; per signal a summary over every match (in how many parts it changed, the
+    cycles from the match to its first change after and from its last change before, its values at the match)."""
+    w = wave(a.get('dump'), a)
+    scope, radix = a.get('scope') or '', a.get('radix')
+    check_radix(radix)
+    if not a.get('expr'):
+        raise WaveError('"expr": the SV expression whose matches the windows are round (sampled on a clock, as wave_find)')
+    at = a.get('at') or 'start'
+    if at not in AROUND_AT:
+        raise WaveError('"at": start (round the start of each match), end, or both (round each change of it)')
+    t0, t1 = window(w, a)
+    n = limit(a, 10)
+    r = find_expr(w, {k: v for k, v in a.items() if k not in ('values', 'limit')}, scope, t0, t1, 10 ** 7)
+    scope, clk = scope or r.get('scope') or '', r['clock']
+    rises = w.edges(clk, 'posedge', float('-inf'), float('inf'))
+    if not rises:
+        raise WaveError(f'{clk}: no rising edge to count cycles on')
+    before, after = a.get('before', 2), a.get('after', 4)
+    for k, v in (('before', before), ('after', after)):
+        if not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
+            raise WaveError(f'"{k}": a number of cycles of {clk}')
+    # the stretches: matches of consecutive cycles together (a sequence's: its first cycle to its last); [first, last cycle
+    # of the expression's own, the time of the first, of the last]
+    spans = []
+    for c, t, e, te in sorted(r['rows']):
+        if spans and c <= spans[-1][1] + 1:
+            if e >= spans[-1][1]:
+                spans[-1][1], spans[-1][3] = e, te
+        else:
+            spans.append([c, e, t, te])
+    cyc_t = lambda i: rises[min(max(i, 0), len(rises) - 1)]
+    idx = lambda t: max(0, bisect.bisect_right(rises, t) - 1)   # the rising edge of the clock at or before t (its index)
+    hi_of = lambda i: min(t1, rises[i] if i < len(rises) else w.t_end)
+    stretches, marks = [], []   # marks: (the edge a window is round, its stretch)
+    for _, _, t, te in spans:
+        x = {'from': ps_of(t, 't'), 'to': ps_of(te, 't')}
+        x['i0'], x['i1'] = idx(x['from']), idx(x['to'])
+        stretches.append(x)
+        if at in ('start', 'both'):
+            marks.append((x['i0'], x))
+        if at in ('end', 'both'):
+            marks.append((x['i1'] + 1 if at == 'both' else x['i1'], x))   # both: where it stops holding, the edge after its last
+    parts = []   # the windows, those that touch merged
+    for i, x in sorted(marks, key=lambda m: m[0]):
+        lo, hi = max(t0, cyc_t(i - before)), hi_of(i + after)
+        if parts and lo <= parts[-1]['hi']:
+            parts[-1]['hi'] = max(parts[-1]['hi'], hi)
+            if x not in parts[-1]['spans']:
+                parts[-1]['spans'].append(x)
+        else:
+            parts.append({'lo': lo, 'hi': hi, 'spans': [x]})
+    sigs = a.get('signals')
+    sigs = ([x for x in re.split(r'[,\s]+', sigs) if x] if isinstance(sigs, str) else list(sigs or [])) or expr_names(w, r['expr'], scope)
+    if not sigs:
+        raise WaveError('no signals to look at: give "signals"')
+    names, res = w.signals(sigs, scope)
+    sts = [w.stream(p, sl) for p, sl in res]
+    between = lambda st, lo, hi: st[bisect.bisect_right(st, (lo, '\uffff')):bisect.bisect_right(st, (hi, '\uffff'))]   # its changes in (lo, hi]
+    out = {'unit': 'ns', 'expr': r['expr'], 'clock': clk, 'scope': scope or None, 'at': at, 'before': before, 'after': after,
+           'matches': len(spans), 'cycles_matched': sum(x[1] - x[0] + 1 for x in spans), 'parts': len(parts), 'gaps': max(0, len(parts) - 1),
+           'kept': ns(sum(x['hi'] - x['lo'] for x in parts)), 'total': ns(t1 - t0), 'signals': {}, 'windows': []}
+    per = a.get('changes', 6)   # the changes listed per signal and window
+    if not (isinstance(per, int) and not isinstance(per, bool) and per >= 0):
+        raise WaveError('"changes": how many changes of each signal a window lists (0: none, its summary only)')
+    for x in parts[:n]:
+        e = {'from': ns(x['lo']), 'to': ns(x['hi']), 'matches': [[ns(s['from']), ns(s['to'])] for s in x['spans']], 'signals': {}}
+        for name, (p, sl), st in zip(names, res, sts):
+            ch, o = between(st, x['lo'], x['hi']), {'initial': w.text(p, sl, w.at(st, x['lo']), radix)}
+            if ch and per:
+                o['changes'] = [[ns(t), w.text(p, sl, v, radix)] for t, v in ch[:per]]
+            if len(ch) > per:
+                o['more'] = len(ch) - per
+            e['signals'][name] = o
+        out['windows'].append(e)
+    if len(parts) > n:
+        out['more'] = len(parts) - n
+    # per signal over every match: the windows it changed in; the cycles from the match's edge to its first change at or
+    # after it, as ##n says (a change at that edge or before the next: 1, the next edge sees it), and from its last change
+    # before it (1: since the edge before), within after / before; its values at the match, as the expression samples them
+    # (just before the edge)
+    for name, (p, sl), st in zip(names, res, sts):
+        o, lat, ago, vals = {'changed_in': sum(1 for x in parts if between(st, x['lo'], x['hi'])), 'of': len(parts)}, [], [], {}
+        for x in stretches:
+            ts, i0 = x['from'], x['i0']
+            j = max(1, bisect.bisect_left(st, (ts, '')))
+            if j < len(st) and bisect.bisect_right(rises, st[j][0]) - i0 <= after:
+                lat.append(bisect.bisect_right(rises, st[j][0]) - i0)
+            jb = bisect.bisect_left(st, (ts, '')) - 1   # (its first entry is its value at the start, no change)
+            if jb >= 1 and st[jb][0] >= cyc_t(i0 - before):
+                ago.append(i0 - idx(st[jb][0]))
+            v = w.text(p, sl, w.at(st, ts, True), radix)
+            vals[v] = vals.get(v, 0) + 1
+        if lat:
+            o['after'] = {'n': len(lat), 'min': min(lat), 'max': max(lat)}
+        if ago:
+            o['before'] = {'n': len(ago), 'min': min(ago), 'max': max(ago)}
+        o['at_match'] = dict(sorted(vals.items(), key=lambda kv: -kv[1])[:5])
+        out['signals'][name] = o
+    if a.get('out'):   # the same on a page: the expression a row, its gaps on the waves (keep: the larger of before and after)
+        if not str(a['out']).lower().endswith('.html'):
+            raise WaveError(f'"out": a .html page, not {a["out"]}')
+        pg = t_page({'dump': a.get('dump'), 'types': a.get('types'), 'no_types': a.get('no_types'), 'signals': names + [clk], 'scope': scope,
+                     'from': a.get('from'), 'to': a.get('to'), 'out': a['out'], 'title': a.get('title') or f'round {r["expr"]}'})
+        viewedit.edit_page(pg['page'], [{'op': 'expr', 'text': r['expr'], 'scope': scope or None, 'row': True,
+                                         **({'follow': True} if at == 'both' else {'gap': True})},
+                                        {'op': 'gaps', 'on': True, 'view': True, 'keep': str(max(before, after))}])
+        out['page'] = pg['page']
+    return out
+
+
 def t_stats(a):
     w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
@@ -1283,7 +1414,9 @@ def summary(st, timed, base=None):
         out['spans'] = [dict(x, id=i + 1, **{'from': t(x['from']), 'to': t(x['to'])}) for i, x in enumerate(ss)]
     xs = ed.exprs()
     if xs:
-        out['exprs'] = [dict({'expr': e} if isinstance(e, str) else e, id=i + 1) for i, e in enumerate(map(viewedit.expr_json, xs))]
+        fl = ed.gap_opt()['gapSignals']   # the gaps that follow an expression: its row ƒ among them (expr follow)
+        out['exprs'] = [dict({'expr': e} if isinstance(e, str) else e, id=i + 1, **({'follow': True} if 'ƒ ' + x['text'] in fl else {}))
+                        for i, (x, e) in enumerate(zip(xs, map(viewedit.expr_json, xs)))]
     if st.get('groups'):
         out['groups'] = st['groups']
     hl = ed.highlight()
@@ -1921,6 +2054,15 @@ TOOLS = [
          'there (a wave_sample table; with b, table_b: the other run\'s); out (.html): a page of that window with a marker and the cursor there.',
          {'dump': None, 'types': None, 'no_types': None, 'expr': S, 'assert': S, 'sva': L, 'clock': S, 'nth': N, 'b': S, 'map': {'type': 'object'}, 'offset': T, 't': T,
           'signals': None, 'scope': None, 'before': N, 'after': N, 'limit': None, 'out': S, 'title': S}, ('dump',), ro=False),
+    tool('wave_around', t_around, 'What the signals do round an expression\'s matches, as the viewer\'s gaps keep them: each match '
+         '(its cycles together) a window of before / after cycles of the clock round its start (at end: its end; both: each change of '
+         'it, the gaps that follow it), windows that touch one part, the rest left out -> matches, parts, gaps, kept of total; windows '
+         '[from, to, matches, per signal initial and its first changes]; per signal changed_in (windows), after / before {n, min, max}: the '
+         'cycles from a match to its first change after it and from its last change before it, at_match: its values there. signals: '
+         'default the expression\'s; out (.html): the page, the expression a row and its gaps on the waves.',
+         {'dump': None, 'types': None, 'no_types': None, 'expr': S, 'clock': S, 'signals': None, 'at': {'type': 'string', 'enum': list(AROUND_AT)},
+          'before': N, 'after': N, 'changes': N, 'from': None, 'to': None, 'scope': None, 'limit': None, 'radix': None, 'out': S, 'title': S,
+          'defines': {'type': ['object', 'array'], 'items': S}}, ('dump', 'expr'), ro=False),
     tool('wave_fsm', t_fsm, 'An FSM\'s states in a dump: each state\'s entries, first entry, time held and share, the states never reached, '
          'the values of no state (x, z, a code without a label), its changes by count. Its table: the dump\'s (FST), the types file, or enum {code: label}.',
          {'dump': None, 'types': None, 'no_types': None, 'signal': S, 'enum': {'type': 'object'}, 'from': None, 'to': None, 'scope': None}, ('dump', 'signal')),
